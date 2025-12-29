@@ -24,7 +24,7 @@ export async function GET() {
           'Content-Type': 'application/json',
           'X-API-KEY': apiKey,
         },
-        cache: 'no-store', // Changed from next.revalidate for better compatibility
+        cache: 'no-store', 
       }
     );
 
@@ -34,35 +34,14 @@ export async function GET() {
         `External API error: ${response.status} ${response.statusText}`,
         errorBody
       );
-      return NextResponse.json(
-        { 
-          error: 'Failed to fetch packages from external source.',
-          statusCode: response.status 
-        },
-        { status: response.status }
-      );
+      return new NextResponse(errorBody, { status: response.status });
     }
 
     const data = await response.json();
-
-    // The external API returns an object with a `packages` key.
-    // We need to extract this array before sending it to the client.
-    if (data && Array.isArray(data.packages)) {
-      return NextResponse.json(data.packages, { status: 200 });
-    }
-
-    // If no packages key exists, log and return appropriate error
-    console.error('Unexpected response structure from external API:', data);
-    return NextResponse.json(
-      { 
-        error: 'Unexpected response structure from external API.',
-        receivedData: data 
-      },
-      { status: 500 }
-    );
+    
+    return NextResponse.json(data);
 
   } catch (error: unknown) {
-    // Better error handling with type safety
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
     console.error('Error fetching from /api/packages:', error);
     

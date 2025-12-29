@@ -29,14 +29,25 @@ export default function Home() {
       try {
         setIsLoading(true);
         const response = await fetch('/api/packages');
+        
         if (!response.ok) {
+          const errorText = await response.text();
+          console.error("Failed to fetch packages. Status:", response.status, "Body:", errorText);
           throw new Error('Failed to fetch packages');
         }
+        
         const data = await response.json();
-        setAllPackages(data);
+
+        // The external API returns { packages: [...] }, so we extract the array
+        if (data && Array.isArray(data.packages)) {
+          setAllPackages(data.packages);
+        } else {
+          console.error("Unexpected data structure from API:", data);
+          setAllPackages([]); // Set to empty array if structure is not as expected
+        }
+
       } catch (error) {
         console.error(error);
-        // Here you might want to set an error state and display a message to the user
       } finally {
         setIsLoading(false);
       }
@@ -60,7 +71,8 @@ export default function Home() {
 
   const filteredPackages = useMemo(() => {
     if (!selectedNetwork) return [];
-    return allPackages.filter((pkg: Package) => pkg.network.name === selectedNetwork)
+    // The external API nests network info, so we access it via pkg.network.name
+    return allPackages.filter((pkg: Package) => pkg.network && pkg.network.name === selectedNetwork)
       .sort((a, b) => a.price - b.price);
   }, [selectedNetwork, allPackages]);
 
@@ -69,8 +81,8 @@ export default function Home() {
       alert('Please login to purchase');
       return;
     }
-    if (!phoneNumber) {
-      alert('Please enter a phone number');
+    if (!phoneNumber || !validatePhoneNumber(phoneNumber)) {
+      alert('Please enter a valid phone number');
       return;
     }
     
@@ -83,6 +95,11 @@ export default function Home() {
       dataAmount: pkg.dataAmount,
     });
   };
+  
+    // Helper function to validate phone number. You might already have this, if not, it's useful.
+    const validatePhoneNumber = (phone: string): boolean => {
+        return /^0(20|50|24|54|55|59|27|57|26|56)\d{7}$/.test(phone);
+    }
 
   return (
     <div className="container mx-auto max-w-4xl px-4 py-8 sm:py-12">
@@ -107,7 +124,6 @@ export default function Home() {
       >
         <Card className="shadow-lg">
           <CardHeader className="space-y-4">
-            {/* Balance Display */}
             {user && (
               <div className="flex items-center justify-between rounded-lg bg-accent/10 p-4">
                 <div className="flex items-center gap-2">
@@ -120,13 +136,11 @@ export default function Home() {
               </div>
             )}
 
-            {/* Phone Input */}
             <div className="space-y-2">
               <label className="text-sm font-medium">Phone Number</label>
               <PhoneInputForm onPhoneNumberChange={handlePhoneNumberChange} />
             </div>
 
-            {/* Network Selector */}
             <div className="space-y-2">
               <label className="text-sm font-medium">Select Network</label>
               <div className="flex gap-2">
@@ -158,7 +172,6 @@ export default function Home() {
           </CardHeader>
 
           <CardContent>
-            {/* Package List */}
             <div className="space-y-2">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-lg">
@@ -208,7 +221,7 @@ export default function Home() {
                   >
                     {filteredPackages.map((pkg, index) => (
                       <motion.div
-                        key={pkg.id}
+                        key={pkg.sharedBundle} // Using sharedBundle as it should be a unique ID
                         initial={{ opacity: 0, x: -20 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ duration: 0.2, delay: index * 0.03 }}
@@ -220,8 +233,8 @@ export default function Home() {
                       >
                         <div className="flex items-center gap-4">
                           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-accent/10 text-accent font-bold">
-                            {pkg.dataAmount.split(' ')[0]}
-                            <span className="text-xs ml-1">{pkg.dataAmount.split(' ')[1]}</span>
+                            {pkg.dataAmount.replace(/[^0-9.]/g, '')}
+                            <span className="text-xs ml-1">{pkg.dataAmount.replace(/[0-9.]/g, '').trim()}</span>
                           </div>
                           <div>
                             <p className="font-semibold">{pkg.dataAmount}</p>
@@ -256,7 +269,6 @@ export default function Home() {
         </Card>
       </motion.div>
 
-      {/* Info Section */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
