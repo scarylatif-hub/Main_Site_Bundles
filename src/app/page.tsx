@@ -38,9 +38,9 @@ export default function Home() {
         
         const data = await response.json();
 
-        // The external API returns { packages: [...] }, so we extract the array
-        if (data && Array.isArray(data.packages)) {
-          setAllPackages(data.packages);
+        // The API now returns a direct array of packages.
+        if (Array.isArray(data)) {
+          setAllPackages(data);
         } else {
           console.error("Unexpected data structure from API:", data);
           setAllPackages([]); // Set to empty array if structure is not as expected
