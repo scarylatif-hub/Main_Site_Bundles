@@ -1,8 +1,7 @@
 "use client";
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { PhoneInputForm } from '@/components/phone-input-form';
-import { PACKAGES } from '@/lib/placeholder-data';
 import type { Package, NetworkName } from '@/lib/definitions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -12,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/context/auth-context';
 import { useCart } from '@/hooks/use-cart';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const networks: NetworkName[] = ["MTN", "Telecel", "AirtelTigo"];
 
@@ -21,6 +21,30 @@ export default function Home() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [detectedNetwork, setDetectedNetwork] = useState<NetworkName | null>(null);
   const [selectedNetwork, setSelectedNetwork] = useState<NetworkName | null>(null);
+  const [allPackages, setAllPackages] = useState<Package[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchPackages = async () => {
+      try {
+        setIsLoading(true);
+        const response = await fetch('/api/packages');
+        if (!response.ok) {
+          throw new Error('Failed to fetch packages');
+        }
+        const data = await response.json();
+        setAllPackages(data);
+      } catch (error) {
+        console.error(error);
+        // Here you might want to set an error state and display a message to the user
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchPackages();
+  }, []);
+
 
   const handlePhoneNumberChange = (number: string, network: NetworkName | null) => {
     setPhoneNumber(number);
@@ -36,9 +60,9 @@ export default function Home() {
 
   const filteredPackages = useMemo(() => {
     if (!selectedNetwork) return [];
-    return PACKAGES.filter((pkg: Package) => pkg.network.name === selectedNetwork)
+    return allPackages.filter((pkg: Package) => pkg.network.name === selectedNetwork)
       .sort((a, b) => a.price - b.price);
-  }, [selectedNetwork]);
+  }, [selectedNetwork, allPackages]);
 
   const handleBuyPackage = (pkg: Package) => {
     if (!user) {
@@ -140,7 +164,7 @@ export default function Home() {
                 <h3 className="font-semibold text-lg">
                   {selectedNetwork ? `${selectedNetwork} Packages` : 'Select a Network'}
                 </h3>
-                {selectedNetwork && (
+                {selectedNetwork && !isLoading &&(
                   <span className="text-sm text-muted-foreground">
                     {filteredPackages.length} packages available
                   </span>
@@ -148,7 +172,13 @@ export default function Home() {
               </div>
 
               <AnimatePresence mode="wait">
-                {!selectedNetwork ? (
+                {isLoading ? (
+                   <motion.div className="space-y-2">
+                      {[...Array(5)].map((_, i) => (
+                        <Skeleton key={i} className="h-20 w-full rounded-lg" />
+                      ))}
+                   </motion.div>
+                ) : !selectedNetwork ? (
                   <motion.div
                     key="no-network"
                     initial={{ opacity: 0 }}
@@ -190,7 +220,8 @@ export default function Home() {
                       >
                         <div className="flex items-center gap-4">
                           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-accent/10 text-accent font-bold">
-                            {pkg.dataAmount}
+                            {pkg.dataAmount.split(' ')[0]}
+                            <span className="text-xs ml-1">{pkg.dataAmount.split(' ')[1]}</span>
                           </div>
                           <div>
                             <p className="font-semibold">{pkg.dataAmount}</p>

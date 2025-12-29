@@ -42,8 +42,3 @@ export type Transaction = {
     balance_after: number | null;
     created_at: string;
 };
-
-/**
- * @deprecated The Order type is deprecated. Use Transaction instead.
- */
-export type Order = Transaction;
