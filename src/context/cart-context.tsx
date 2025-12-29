@@ -1,13 +1,13 @@
 "use client";
 
-import React, { createContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useState, useEffect, useMemo, useCallback } from 'react';
 import type { CartItem } from '@/lib/definitions';
 import { useToast } from '@/hooks/use-toast';
 
 interface CartContextType {
   cartItems: CartItem[];
   addToCart: (item: Omit<CartItem, 'cartId'>) => void;
-  removeFromCart: (cartId: string) => void;
+  removeFromCart: (cartId: string, showToast?: boolean) => void;
   clearCart: () => void;
   updateItemPhoneNumber: (cartId: string, newPhoneNumber: string) => void;
   itemCount: number;
@@ -39,7 +39,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
   }, [cartItems]);
 
-  const addToCart = (item: Omit<CartItem, 'cartId'>) => {
+  const addToCart = useCallback((item: Omit<CartItem, 'cartId'>) => {
     setCartItems(prevItems => {
         const newItem: CartItem = { ...item, cartId: crypto.randomUUID() };
         return [...prevItems, newItem];
@@ -48,28 +48,30 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         title: "Added to Cart",
         description: `${item.dataAmount} for ${item.recipientMsisdn}`,
     });
-  };
+  }, [toast]);
 
-  const removeFromCart = (cartId: string) => {
+  const removeFromCart = useCallback((cartId: string, showToast = true) => {
     setCartItems(prevItems => prevItems.filter(item => item.cartId !== cartId));
-    toast({
-        title: "Item Removed",
-        description: "The item has been removed from your cart.",
-        variant: "destructive"
-    });
-  };
+    if (showToast) {
+        toast({
+            title: "Item Removed",
+            description: "The item has been removed from your cart.",
+            variant: "destructive"
+        });
+    }
+  }, [toast]);
 
-  const updateItemPhoneNumber = (cartId: string, newPhoneNumber: string) => {
+  const updateItemPhoneNumber = useCallback((cartId: string, newPhoneNumber: string) => {
     setCartItems(prevItems => 
         prevItems.map(item => 
             item.cartId === cartId ? { ...item, recipientMsisdn: newPhoneNumber } : item
         )
     );
-  };
+  }, []);
 
-  const clearCart = () => {
+  const clearCart = useCallback(() => {
     setCartItems([]);
-  };
+  }, []);
 
   const itemCount = useMemo(() => cartItems.length, [cartItems]);
 

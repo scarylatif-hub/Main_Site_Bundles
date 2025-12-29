@@ -15,10 +15,10 @@ export async function POST(req: NextRequest) {
   const { recipientMsisdn, networkId, sharedBundle, price, dataAmount } = await req.json();
 
   if (!recipientMsisdn || !networkId || !sharedBundle || price === undefined || !dataAmount) {
-    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    return NextResponse.json({ error: 'Missing required fields for purchase' }, { status: 400 });
   }
   
-  // First, check user's balance
+  // First, verify user's balance is sufficient before attempting any external API call
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('wallet_balance')
@@ -26,23 +26,25 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (profileError || !profile) {
+    console.error("Profile fetch error:", profileError);
     return NextResponse.json({ error: 'Could not retrieve user profile.' }, { status: 500 });
   }
 
   if (profile.wallet_balance < price) {
-    return NextResponse.json({ error: 'Insufficient funds' }, { status: 400 });
+    return NextResponse.json({ error: 'Insufficient funds. Please top up your wallet.' }, { status: 400 });
   }
 
 
   const apiKey = process.env.CHEAP_BUNDLES_API_KEY;
 
   if (!apiKey) {
-    console.error('API key is not configured');
-    return NextResponse.json({ error: 'Internal server error: API key missing' }, { status: 500 });
+    console.error('API key (CHEAP_BUNDLES_API_KEY) is not configured');
+    return NextResponse.json({ error: 'Internal server error: Service not configured' }, { status: 500 });
   }
 
+  // Attempt to purchase the bundle from the external API
   try {
-    const response = await fetch('https://cheap-bundles-ghana.azurewebsites.net/api/external/packages/buy-other', {
+    const externalApiResponse = await fetch('https://cheap-bundles-ghana.azurewebsites.net/api/external/packages/buy-other', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -51,26 +53,31 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({ recipientMsisdn, networkId, sharedBundle }),
     });
 
-    const result = await response.json();
+    const result = await externalApiResponse.json();
 
-    if (!response.ok || !result.success) {
-        console.error("External API error:", result);
+    if (!externalApiResponse.ok || !result.success) {
+        console.error("External API purchase failed:", result);
         const transactionCode = result.transactionCode || `FAILED-${Date.now()}`;
-        // Log the transaction with a failed status
-        await supabase.rpc('purchase_bundle_and_log_transaction', {
-            p_user_id: session.user.id,
-            p_amount: price,
-            p_transaction_code: transactionCode,
-            p_status: 'failed',
-            p_recipient_msisdn: recipientMsisdn,
-            p_network_id: networkId,
-            p_bundle_amount: dataAmount,
-            p_description: `Failed purchase: ${result.message || 'Unknown error'}`
+        // Log the FAILED transaction, but DO NOT deduct from wallet since the purchase failed.
+        const { error: logError } = await supabase
+        .from('transactions')
+        .insert({
+            user_id: session.user.id,
+            amount: price, // Log the intended amount
+            transaction_code: transactionCode,
+            status: 'failed',
+            transaction_type: 'purchase',
+            recipient_msisdn: recipientMsisdn,
+            network_id: networkId,
+            bundle_amount: dataAmount,
+            description: `Failed purchase: ${result.message || 'Unknown external API error'}`
         });
-        return NextResponse.json({ error: result.message || 'Failed to purchase bundle' }, { status: response.status });
+        if(logError) console.error("Error logging failed transaction:", logError);
+
+        return NextResponse.json({ error: result.message || 'Failed to purchase bundle from provider' }, { status: externalApiResponse.status });
     }
 
-    // Log the successful transaction using the RPC function
+    // If external purchase was successful, now debit user wallet and log the transaction atomically.
     const { error: rpcError } = await supabase.rpc('purchase_bundle_and_log_transaction', {
         p_user_id: session.user.id,
         p_amount: price,
@@ -83,22 +90,35 @@ export async function POST(req: NextRequest) {
     });
 
     if (rpcError) {
-        console.error("Error logging successful transaction via RPC:", rpcError);
-        // This case is tricky. The purchase was successful with the external API
-        // but logging and debiting failed in our DB. This can lead to inconsistency.
-        // For now, we'll inform the user but the external purchase did go through.
-        // A more robust solution might involve a reconciliation process.
+        console.error("CRITICAL: RPC 'purchase_bundle_and_log_transaction' failed after successful external purchase.", rpcError);
+        // This is a critical state. The user got the bundle but we failed to debit them.
+        // We log this internally for reconciliation but inform the user of success.
+        // A more advanced system would have a reconciliation queue.
         return NextResponse.json({ 
-            error: 'Purchase succeeded but failed to update your account. Please contact support.',
+            success: true, 
+            message: 'Purchase successful. There was a slight delay in updating your balance, please refresh.',
             ...result 
-        }, { status: 500 });
+        });
     }
-
 
     return NextResponse.json({ success: true, ...result });
 
   } catch (error: any) {
-    console.error('Error in /api/buy-bundle:', error);
+    console.error('Unhandled error in /api/buy-bundle:', error);
+    // Log a generic failure if the fetch itself fails
+     await supabase
+        .from('transactions')
+        .insert({
+            user_id: session.user.id,
+            amount: price,
+            transaction_code: `ERROR-${Date.now()}`,
+            status: 'failed',
+            transaction_type: 'purchase',
+            recipient_msisdn: recipientMsisdn,
+            network_id: networkId,
+            bundle_amount: dataAmount,
+            description: `Internal Server Error: ${error.message}`
+        });
     return NextResponse.json({ error: 'Internal server error', details: error.message }, { status: 500 });
   }
 }

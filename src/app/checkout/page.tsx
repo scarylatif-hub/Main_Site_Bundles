@@ -5,20 +5,28 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Info, Wallet, ShoppingBag } from "lucide-react";
+import { Info, Wallet, ShoppingBag, AlertCircle } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/auth-context";
 import { useState } from "react";
+import { CartItem } from "@/lib/definitions";
+
+type PurchaseResult = {
+    item: CartItem;
+    success: boolean;
+    message: string;
+};
 
 export default function CheckoutPage() {
-    const { cartItems, totalPrice, clearCart } = useCart();
+    const { cartItems, totalPrice, clearCart, removeFromCart } = useCart();
     const { user, userProfile, loading: authLoading, refreshUser } = useAuth();
     const router = useRouter();
     const { toast } = useToast();
     
     const [isProcessing, setIsProcessing] = useState(false);
+    const [purchaseResults, setPurchaseResults] = useState<PurchaseResult[]>([]);
 
     const walletBalance = userProfile?.wallet_balance ?? 0;
     const isSufficient = walletBalance >= totalPrice;
@@ -34,69 +42,63 @@ export default function CheckoutPage() {
         }
 
         setIsProcessing(true);
+        setPurchaseResults([]);
 
-        const purchasePromises = cartItems.map(item =>
-            fetch('/api/buy-bundle', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(item),
-            }).then(async response => {
+        // Process each item sequentially to avoid race conditions with balance updates
+        const results: PurchaseResult[] = [];
+        for (const item of cartItems) {
+            try {
+                const response = await fetch('/api/buy-bundle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(item),
+                });
+                
+                const resultData = await response.json();
+
                 if (!response.ok) {
-                    const result = await response.json().catch(() => ({ error: 'An unexpected error occurred.' }));
-                    // Use a more specific error from the API response if available
-                    throw new Error(result.error || `HTTP error! status: ${response.status}`);
+                    throw new Error(resultData.error || `Purchase failed with status ${response.status}`);
                 }
-                return response.json();
-            })
-        );
+                
+                results.push({ item, success: true, message: 'Purchase successful!' });
+                
+                // Optimistically remove from cart UI and refresh user balance
+                removeFromCart(item.cartId);
+                if (refreshUser) await refreshUser();
 
-        const results = await Promise.allSettled(purchasePromises);
-
-        let successCount = 0;
-        let failureCount = 0;
-
-        results.forEach((result, index) => {
-            const item = cartItems[index];
-            if (result.status === 'fulfilled') {
-                successCount++;
-                 toast({
-                    title: `Purchase Successful`,
-                    description: `${item.dataAmount} for ${item.recipientMsisdn} was successful.`,
-                });
-            } else {
-                failureCount++;
-                console.error("Purchase error for item:", item.cartId, result.reason);
-                toast({
-                    title: `Purchase Failed for ${item.dataAmount}`,
-                    description: result.reason.message || 'An unknown error occurred.',
-                    variant: "destructive",
-                });
+            } catch (error: any) {
+                results.push({ item, success: false, message: error.message || 'An unknown error occurred.' });
             }
-        });
-
-        setIsProcessing(false);
+        }
         
-        // Refresh user balance regardless of outcome
-        if (refreshUser) refreshUser();
+        setPurchaseResults(results);
+        setIsProcessing(false);
 
-        if (failureCount === 0) {
+        const successfulPurchases = results.filter(r => r.success);
+        const failedPurchases = results.filter(r => !r.success);
+
+        if (failedPurchases.length === 0) {
             toast({
                 title: "All Purchases Successful!",
-                description: "Your data bundles have been sent.",
+                description: "Your data bundles have been sent. Redirecting to orders...",
             });
-            clearCart();
-            router.push('/orders');
+            setTimeout(() => router.push('/orders'), 2000);
+        } else if (successfulPurchases.length > 0) {
+            toast({
+                title: "Some Purchases Completed",
+                description: `${successfulPurchases.length} bundles purchased. ${failedPurchases.length} failed.`,
+                variant: "default"
+            });
         } else {
              toast({
-                title: "Some Purchases Failed",
-                description: `${failureCount} out of ${cartItems.length} bundles could not be purchased. Please check your orders for details.`,
+                title: "All Purchases Failed",
+                description: "Could not purchase any bundles. Please check errors below.",
                 variant: "destructive"
             });
-            // A more complex logic could be to remove only successful items.
-            // For simplicity, we clear the cart and navigate to orders to see what went through.
-            clearCart(); 
-            router.push('/orders');
         }
+        
+        // Refresh final balance state
+        if (refreshUser) await refreshUser();
     }
 
     if (authLoading) {
@@ -116,6 +118,43 @@ export default function CheckoutPage() {
             </div>
         )
     }
+    
+    // After processing, if cart becomes empty, show results and redirect.
+    if (cartItems.length === 0 && purchaseResults.length > 0) {
+        return (
+            <div className="container mx-auto max-w-3xl px-4 py-8 sm:py-12">
+                 <PageHeader
+                    title="Purchase Complete"
+                    description="Review the status of your purchases below."
+                />
+                <Card className="mt-8">
+                    <CardHeader>
+                        <CardTitle>Purchase Summary</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        {purchaseResults.map(res => (
+                            <Alert key={res.item.cartId} variant={res.success ? "default" : "destructive"} className={res.success ? 'bg-success/10 border-success/30' : ''}>
+                                {res.success ? <Info className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                                <AlertTitle>{res.item.dataAmount} for {res.item.recipientMsisdn}</AlertTitle>
+                                <AlertDescription>
+                                   Status: <span className="font-semibold">{res.success ? "Success" : "Failed"}</span>
+                                   {!res.success && <p>Reason: {res.message}</p>}
+                                </AlertDescription>
+                            </Alert>
+                        ))}
+                    </CardContent>
+                    <CardFooter className='flex-col gap-4'>
+                        <Button onClick={() => router.push('/orders')} className="w-full">
+                            View All My Orders
+                        </Button>
+                        <Button onClick={() => router.push('/')} className="w-full" variant='outline'>
+                            Buy More Data
+                        </Button>
+                    </CardFooter>
+                </Card>
+            </div>
+        )
+    }
 
     return (
         <div className="container mx-auto max-w-3xl px-4 py-8 sm:py-12">
@@ -124,7 +163,7 @@ export default function CheckoutPage() {
                 description="Review your order and complete your purchase."
             />
 
-            {cartItems.length === 0 ? (
+            {cartItems.length === 0 && purchaseResults.length === 0 ? (
                 <div className="mt-16 text-center">
                     <ShoppingBag className="mx-auto h-24 w-24 text-muted-foreground/30" />
                     <p className="mt-4 text-xl font-semibold">Your cart is empty.</p>
@@ -175,9 +214,9 @@ export default function CheckoutPage() {
                                 </Alert>
                             )}
                             <div className="flex flex-col gap-4 sm:flex-row">
-                                <Button className="w-full" onClick={handlePayWithWallet} disabled={!isSufficient || isProcessing}>
+                                <Button className="w-full" onClick={handlePayWithWallet} disabled={!isSufficient || isProcessing || cartItems.length === 0}>
                                     <Wallet className="mr-2 h-4 w-4" />
-                                    {isProcessing ? 'Processing...' : `Pay with Wallet (GHS ${walletBalance.toFixed(2)})`}
+                                    {isProcessing ? 'Processing...' : `Pay with Wallet (Balance: GHS ${walletBalance.toFixed(2)})`}
                                 </Button>
                             </div>
                         </CardContent>
