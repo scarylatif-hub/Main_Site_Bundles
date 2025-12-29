@@ -3,7 +3,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { PhoneInputForm } from '@/components/phone-input-form';
-import type { NetworkName } from '@/lib/definitions';
+import type { NetworkName, Package } from '@/lib/definitions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Wallet, ShoppingCart } from 'lucide-react';
@@ -14,17 +14,6 @@ import { useCart } from '@/hooks/use-cart';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 
-// A new simplified package type that matches the transformed data from our API route
-export interface SimplePackage {
-  id: string;
-  networkId: number;
-  networkName: NetworkName;
-  dataAmount: string;
-  validity: string;
-  price: number;
-  sharedBundle: number;
-}
-
 const networks: NetworkName[] = ["MTN", "Telecel", "AirtelTigo"];
 
 export default function Home() {
@@ -33,7 +22,7 @@ export default function Home() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [detectedNetwork, setDetectedNetwork] = useState<NetworkName | null>(null);
   const [selectedNetwork, setSelectedNetwork] = useState<NetworkName | null>(null);
-  const [allPackages, setAllPackages] = useState<SimplePackage[]>([]);
+  const [allPackages, setAllPackages] = useState<Package[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -50,7 +39,6 @@ export default function Home() {
         
         const data = await response.json();
 
-        // Our API route now returns a direct array of SimplePackage
         if (Array.isArray(data)) {
           setAllPackages(data);
         } else {
@@ -83,12 +71,12 @@ export default function Home() {
 
   const filteredPackages = useMemo(() => {
     if (!selectedNetwork) return [];
-    // The data is now flat, so we can filter directly on `networkName`
-    return allPackages.filter((pkg) => pkg.networkName === selectedNetwork)
+    // The data structure contains the nested network object.
+    return allPackages.filter((pkg) => pkg.network.name === selectedNetwork)
       .sort((a, b) => a.price - b.price);
   }, [selectedNetwork, allPackages]);
 
-  const handleBuyPackage = (pkg: SimplePackage) => {
+  const handleBuyPackage = (pkg: Package) => {
     if (!user) {
       alert('Please login to purchase');
       return;
@@ -98,11 +86,11 @@ export default function Home() {
       return;
     }
     
-    // Add to cart using the flat package structure
+    // Add to cart using the original package structure
     addToCart({
       recipientMsisdn: phoneNumber,
-      networkId: pkg.networkId,
-      networkName: pkg.networkName,
+      networkId: pkg.network.id,
+      networkName: pkg.network.name,
       sharedBundle: pkg.sharedBundle,
       price: pkg.price,
       dataAmount: pkg.dataAmount,

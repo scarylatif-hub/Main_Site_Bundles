@@ -40,19 +40,9 @@ export async function GET() {
     const data = await response.json();
     
     // The external API returns an object with a `packages` key containing an array.
-    // We need to extract this array and transform it for the client.
+    // We will now pass this array directly to the client.
     if (data && Array.isArray(data.packages)) {
-      // Transform the data to a simpler, flatter structure for the frontend
-      const transformedPackages = data.packages.map((pkg: any) => ({
-        id: pkg.id,
-        networkId: pkg.network.id,
-        networkName: pkg.network.name,
-        dataAmount: pkg.dataAmount,
-        validity: pkg.validity,
-        price: pkg.price,
-        sharedBundle: pkg.sharedBundle
-      }));
-      return NextResponse.json(transformedPackages);
+      return NextResponse.json(data.packages);
     }
 
     console.error('Unexpected response structure from external API:', data);
