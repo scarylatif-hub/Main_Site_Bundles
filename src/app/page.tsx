@@ -42,7 +42,11 @@ export default function Home() {
         // The API now returns the array directly.
         if (Array.isArray(data)) {
           setAllPackages(data);
-        } else {
+        } else if (data && Array.isArray(data.packages)) {
+          // Fallback for the old structure, just in case
+          setAllPackages(data.packages);
+        }
+        else {
           console.error("Unexpected data structure from API:", data);
           setAllPackages([]);
         }

@@ -1,7 +1,6 @@
 
 import { NextResponse } from 'next/server';
 
-// This endpoint is a proxy to the external API to protect the API key.
 export const dynamic = 'force-dynamic'; // Prevents caching issues
 
 export async function GET() {
@@ -34,22 +33,13 @@ export async function GET() {
         `External API error: ${response.status} ${response.statusText}`,
         errorBody
       );
+      // Forward the external API's error response
       return new NextResponse(errorBody, { status: response.status });
     }
 
+    // Pass the raw JSON response directly to the client
     const data = await response.json();
-    
-    // The external API returns an object with a `packages` key containing an array.
-    // We will now pass this array directly to the client.
-    if (data && Array.isArray(data.packages)) {
-      return NextResponse.json(data.packages);
-    }
-
-    console.error('Unexpected response structure from external API:', data);
-    return NextResponse.json(
-      { error: 'Unexpected response structure from external API.' },
-      { status: 500 }
-    );
+    return NextResponse.json(data);
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
