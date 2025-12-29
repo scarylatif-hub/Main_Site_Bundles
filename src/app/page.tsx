@@ -72,12 +72,14 @@ export default function Home() {
   };
 
   const filteredPackages = useMemo(() => {
-    if (!selectedNetwork) return [];
-    return allPackages.filter((pkg) => 
-        pkg.network && pkg.network.name && selectedNetwork &&
-        pkg.network.name.toLowerCase() === selectedNetwork.toLowerCase()
-      )
-      .sort((a, b) => a.price - b.price);
+    if (!selectedNetwork) {
+      return [];
+    }
+    return allPackages.filter((pkg) => {
+      // Robust, case-insensitive filtering
+      return pkg.network && pkg.network.name && 
+             pkg.network.name.toLowerCase() === selectedNetwork.toLowerCase();
+    }).sort((a, b) => a.price - b.price);
   }, [selectedNetwork, allPackages]);
 
   const handleBuyPackage = (pkg: Package) => {
@@ -310,5 +312,3 @@ export default function Home() {
     </div>
   );
 }
-
-    
