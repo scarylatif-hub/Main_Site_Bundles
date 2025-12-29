@@ -14,7 +14,7 @@ import { useState } from "react";
 
 export default function CheckoutPage() {
     const { cartItems, totalPrice, clearCart } = useCart();
-    const { user, userProfile, loading: authLoading } = useAuth();
+    const { user, userProfile, loading: authLoading, refreshUser } = useAuth();
     const router = useRouter();
     const { toast } = useToast();
     
@@ -35,45 +35,78 @@ export default function CheckoutPage() {
 
         setIsProcessing(true);
 
-        for (const item of cartItems) {
-            try {
-                const response = await fetch('/api/buy-bundle', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(item),
-                });
-
+        // Process all items in parallel
+        const purchasePromises = cartItems.map(item =>
+            fetch('/api/buy-bundle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(item),
+            }).then(async response => {
                 const result = await response.json();
-
                 if (!response.ok) {
-                    throw new Error(result.error || 'Failed to purchase bundle');
+                    // Throw an error to be caught by Promise.allSettled
+                    throw new Error(result.error || `Failed to purchase ${item.dataAmount}`);
                 }
+                return { item, result };
+            })
+        );
 
-            } catch (error: any) {
-                console.error("Purchase error for item:", item.cartId, error);
+        const results = await Promise.allSettled(purchasePromises);
+
+        let hasFailures = false;
+        results.forEach((result, index) => {
+            if (result.status === 'rejected') {
+                hasFailures = true;
+                const item = cartItems[index];
+                console.error("Purchase error for item:", item.cartId, result.reason);
                 toast({
-                    title: "Purchase Failed",
-                    description: `Could not purchase ${item.dataAmount}. ${error.message}`,
+                    title: `Purchase Failed for ${item.dataAmount}`,
+                    description: result.reason.message || 'An unknown error occurred.',
                     variant: "destructive",
                 });
-                setIsProcessing(false);
-                return; // Stop processing further items if one fails
             }
-        }
-        
-        toast({
-            title: "Purchase Successful!",
-            description: "Your data bundles have been sent.",
         });
-        clearCart();
-        router.push('/orders');
+
         setIsProcessing(false);
+        
+        // Refresh user balance regardless of outcome
+        if (refreshUser) refreshUser();
+
+        if (!hasFailures) {
+            toast({
+                title: "Purchase Successful!",
+                description: "Your data bundles have been sent.",
+            });
+            clearCart();
+            router.push('/orders');
+        } else {
+             toast({
+                title: "Some Purchases Failed",
+                description: "Please check your cart and try again for the failed items.",
+                variant: "destructive"
+            });
+            // Optionally, remove only successful items from cart
+            // clearCart(); // For now, we clear the whole cart. A more complex logic could be implemented.
+             router.push('/orders'); // still navigate to see successful ones
+        }
     }
 
     if (authLoading) {
          return <div className="text-center p-12">Loading...</div>
+    }
+
+    if (!user) {
+        return (
+             <div className="container mx-auto max-w-3xl px-4 py-8 sm:py-12 text-center">
+                <PageHeader
+                    title="Checkout"
+                    description="Please log in to complete your purchase."
+                />
+                 <Button asChild className="mt-4">
+                        <Link href="/login">Login</Link>
+                </Button>
+            </div>
+        )
     }
 
     return (

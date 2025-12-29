@@ -14,15 +14,31 @@ export async function POST(req: NextRequest) {
 
   const { recipientMsisdn, networkId, sharedBundle, price, dataAmount } = await req.json();
 
-  if (!recipientMsisdn || !networkId || !sharedBundle) {
+  if (!recipientMsisdn || !networkId || !sharedBundle || !price || !dataAmount) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
   }
+
+  // First, check user's balance
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('wallet_balance')
+    .eq('id', session.user.id)
+    .single();
+
+  if (profileError || !profile) {
+    return NextResponse.json({ error: 'Could not retrieve user profile.' }, { status: 500 });
+  }
+
+  if (profile.wallet_balance < price) {
+    return NextResponse.json({ error: 'Insufficient funds' }, { status: 400 });
+  }
+
 
   const apiKey = process.env.CHEAP_BUNDLES_API_KEY;
 
   if (!apiKey) {
     console.error('API key is not configured');
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error: API key missing' }, { status: 500 });
   }
 
   try {
@@ -38,22 +54,23 @@ export async function POST(req: NextRequest) {
     const result = await response.json();
 
     if (!response.ok) {
-      // Log the transaction with a failed status
-      await supabase.rpc('purchase_bundle_and_log_transaction', {
-          p_user_id: session.user.id,
-          p_amount: price,
-          p_transaction_code: `FAILED-${Date.now()}`,
-          p_status: 'failed',
-          p_recipient_msisdn: recipientMsisdn,
-          p_network_id: networkId,
-          p_shared_bundle: sharedBundle,
-          p_bundle_amount: dataAmount,
-          p_description: `Failed purchase of ${dataAmount} for ${recipientMsisdn}`
-      });
-      return NextResponse.json({ error: result.message || 'Failed to purchase bundle' }, { status: response.status });
+        console.error("External API error:", result);
+        // Log the transaction with a failed status
+        await supabase.rpc('purchase_bundle_and_log_transaction', {
+            p_user_id: session.user.id,
+            p_amount: price,
+            p_transaction_code: `FAILED-${Date.now()}`,
+            p_status: 'failed',
+            p_recipient_msisdn: recipientMsisdn,
+            p_network_id: networkId,
+            p_shared_bundle: sharedBundle,
+            p_bundle_amount: dataAmount,
+            p_description: `Failed purchase: ${result.message || 'Unknown error'}`
+        });
+        return NextResponse.json({ error: result.message || 'Failed to purchase bundle' }, { status: response.status });
     }
 
-    // Log the successful transaction
+    // Log the successful transaction using the RPC function
     const { error: rpcError } = await supabase.rpc('purchase_bundle_and_log_transaction', {
         p_user_id: session.user.id,
         p_amount: price,
@@ -67,16 +84,22 @@ export async function POST(req: NextRequest) {
     });
 
     if (rpcError) {
-        console.error("Error logging successful transaction:", rpcError);
-        // Even if logging fails, the purchase was successful. Decide on how to handle this.
-        // For now, we'll still return a success response to the client.
+        console.error("Error logging successful transaction via RPC:", rpcError);
+        // This case is tricky. The purchase was successful with the external API
+        // but logging and debiting failed in our DB. This can lead to inconsistency.
+        // For now, we'll inform the user but the external purchase did go through.
+        // A more robust solution might involve a reconciliation process.
+        return NextResponse.json({ 
+            error: 'Purchase succeeded but failed to update your account. Please contact support.',
+            ...result 
+        }, { status: 500 });
     }
 
 
     return NextResponse.json({ success: true, ...result });
 
-  } catch (error) {
-    console.error('Error purchasing bundle:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  } catch (error: any) {
+    console.error('Error in /api/buy-bundle:', error);
+    return NextResponse.json({ error: 'Internal server error', details: error.message }, { status: 500 });
   }
 }
