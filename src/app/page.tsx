@@ -75,9 +75,10 @@ export default function Home() {
     if (!selectedNetwork) {
       return [];
     }
+    // A robust, case-insensitive filter that also checks for null/undefined values.
     return allPackages.filter((pkg) => {
-      // Robust, case-insensitive filtering
-      return pkg.network && pkg.network.name && 
+      // Safely access pkg.network.name and compare it case-insensitively
+      return pkg.network && typeof pkg.network.name === 'string' &&
              pkg.network.name.toLowerCase() === selectedNetwork.toLowerCase();
     }).sort((a, b) => a.price - b.price);
   }, [selectedNetwork, allPackages]);
