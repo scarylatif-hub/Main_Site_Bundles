@@ -7,8 +7,11 @@ export interface Network {
 }
 
 export interface Package {
-  id: string; // Using sharedBundle as unique id
-  network: Network;
+  id: string; 
+  network: {
+    id: number;
+    name: NetworkName;
+  };
   dataAmount: string;
   validity: string;
   price: number;
@@ -41,4 +44,15 @@ export type Transaction = {
     balance_before: number | null;
     balance_after: number | null;
     created_at: string;
+};
+
+// This type now reflects the data fetched from the backend and used in the frontend
+export type Profile = {
+  id: string;
+  full_name: string;
+  email: string;
+  phone_number: string;
+  wallet_balance: number;
+  is_admin: boolean;
+  updated_at: string;
 };

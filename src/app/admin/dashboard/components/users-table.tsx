@@ -39,7 +39,7 @@ export const columns: ColumnDef<Profile>[] = [
         header: () => <div className="text-right">Balance</div>,
         cell: ({ row }) => {
             const amount = parseFloat(row.getValue("wallet_balance"));
-            const formatted = new Intl.NumberFormat("en-US", {
+            const formatted = new Intl.NumberFormat("en-GH", {
                 style: "currency",
                 currency: "GHS",
             }).format(amount);

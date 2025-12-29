@@ -39,7 +39,27 @@ export async function GET() {
 
     const data = await response.json();
     
-    return NextResponse.json(data);
+    // The external API returns an object with a `packages` key containing an array.
+    // We need to extract this array and transform it for the client.
+    if (data && Array.isArray(data.packages)) {
+      // Transform the data to a simpler, flatter structure for the frontend
+      const transformedPackages = data.packages.map((pkg: any) => ({
+        id: pkg.id,
+        networkId: pkg.network.id,
+        networkName: pkg.network.name,
+        dataAmount: pkg.dataAmount,
+        validity: pkg.validity,
+        price: pkg.price,
+        sharedBundle: pkg.sharedBundle
+      }));
+      return NextResponse.json(transformedPackages);
+    }
+
+    console.error('Unexpected response structure from external API:', data);
+    return NextResponse.json(
+      { error: 'Unexpected response structure from external API.' },
+      { status: 500 }
+    );
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';

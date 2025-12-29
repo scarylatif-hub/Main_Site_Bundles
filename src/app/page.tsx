@@ -1,8 +1,9 @@
+
 "use client";
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { PhoneInputForm } from '@/components/phone-input-form';
-import type { Package, NetworkName } from '@/lib/definitions';
+import type { NetworkName } from '@/lib/definitions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Wallet, ShoppingCart } from 'lucide-react';
@@ -13,6 +14,17 @@ import { useCart } from '@/hooks/use-cart';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 
+// A new simplified package type that matches the transformed data from our API route
+export interface SimplePackage {
+  id: string;
+  networkId: number;
+  networkName: NetworkName;
+  dataAmount: string;
+  validity: string;
+  price: number;
+  sharedBundle: number;
+}
+
 const networks: NetworkName[] = ["MTN", "Telecel", "AirtelTigo"];
 
 export default function Home() {
@@ -21,7 +33,7 @@ export default function Home() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [detectedNetwork, setDetectedNetwork] = useState<NetworkName | null>(null);
   const [selectedNetwork, setSelectedNetwork] = useState<NetworkName | null>(null);
-  const [allPackages, setAllPackages] = useState<Package[]>([]);
+  const [allPackages, setAllPackages] = useState<SimplePackage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -38,12 +50,12 @@ export default function Home() {
         
         const data = await response.json();
 
-        // The API now returns a direct array of packages.
+        // Our API route now returns a direct array of SimplePackage
         if (Array.isArray(data)) {
           setAllPackages(data);
         } else {
           console.error("Unexpected data structure from API:", data);
-          setAllPackages([]); // Set to empty array if structure is not as expected
+          setAllPackages([]);
         }
 
       } catch (error) {
@@ -71,12 +83,12 @@ export default function Home() {
 
   const filteredPackages = useMemo(() => {
     if (!selectedNetwork) return [];
-    // The external API nests network info, so we access it via pkg.network.name
-    return allPackages.filter((pkg: Package) => pkg.network && pkg.network.name === selectedNetwork)
+    // The data is now flat, so we can filter directly on `networkName`
+    return allPackages.filter((pkg) => pkg.networkName === selectedNetwork)
       .sort((a, b) => a.price - b.price);
   }, [selectedNetwork, allPackages]);
 
-  const handleBuyPackage = (pkg: Package) => {
+  const handleBuyPackage = (pkg: SimplePackage) => {
     if (!user) {
       alert('Please login to purchase');
       return;
@@ -86,17 +98,18 @@ export default function Home() {
       return;
     }
     
+    // Add to cart using the flat package structure
     addToCart({
       recipientMsisdn: phoneNumber,
-      networkId: pkg.network.id,
-      networkName: pkg.network.name,
+      networkId: pkg.networkId,
+      networkName: pkg.networkName,
       sharedBundle: pkg.sharedBundle,
       price: pkg.price,
       dataAmount: pkg.dataAmount,
     });
   };
   
-    // Helper function to validate phone number. You might already have this, if not, it's useful.
+    // Helper function to validate phone number.
     const validatePhoneNumber = (phone: string): boolean => {
         return /^0(20|50|24|54|55|59|27|57|26|56)\d{7}$/.test(phone);
     }
@@ -221,7 +234,7 @@ export default function Home() {
                   >
                     {filteredPackages.map((pkg, index) => (
                       <motion.div
-                        key={pkg.sharedBundle} // Using sharedBundle as it should be a unique ID
+                        key={pkg.id} 
                         initial={{ opacity: 0, x: -20 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ duration: 0.2, delay: index * 0.03 }}
