@@ -1,3 +1,4 @@
+
 import { NextResponse } from 'next/server';
 
 // This endpoint is a proxy to the external API to protect the API key.
