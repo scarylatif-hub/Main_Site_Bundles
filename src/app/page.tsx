@@ -73,7 +73,10 @@ export default function Home() {
 
   const filteredPackages = useMemo(() => {
     if (!selectedNetwork) return [];
-    return allPackages.filter((pkg) => pkg.network.name === selectedNetwork)
+    return allPackages.filter((pkg) => 
+        pkg.network && pkg.network.name && selectedNetwork &&
+        pkg.network.name.toLowerCase() === selectedNetwork.toLowerCase()
+      )
       .sort((a, b) => a.price - b.price);
   }, [selectedNetwork, allPackages]);
 
@@ -307,3 +310,5 @@ export default function Home() {
     </div>
   );
 }
+
+    
