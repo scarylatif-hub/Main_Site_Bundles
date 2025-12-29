@@ -26,14 +26,15 @@ export async function GET() {
       return NextResponse.json({ error: 'Failed to fetch packages from external source.' }, { status: response.status });
     }
 
-    const packages = await response.json();
+    const data = await response.json();
     
-    // The external API returns an object with a `packages` key
-    if (packages && packages.packages) {
-        return NextResponse.json(packages.packages);
+    // The external API returns an object with a `packages` key.
+    // We need to extract this array before sending it to the client.
+    if (data && data.packages) {
+        return NextResponse.json(data.packages);
     }
 
-    console.error("Unexpected response structure from external API:", packages);
+    console.error("Unexpected response structure from external API:", data);
     return NextResponse.json({ error: 'Unexpected response structure from external API.' }, { status: 500 });
 
   } catch (error: any) {
