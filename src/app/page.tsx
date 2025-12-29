@@ -39,6 +39,7 @@ export default function Home() {
         
         const data = await response.json();
 
+        // The API now returns the array directly.
         if (Array.isArray(data)) {
           setAllPackages(data);
         } else {
@@ -48,6 +49,7 @@ export default function Home() {
 
       } catch (error) {
         console.error(error);
+        setAllPackages([]); // Ensure packages are cleared on error
       } finally {
         setIsLoading(false);
       }
@@ -71,7 +73,6 @@ export default function Home() {
 
   const filteredPackages = useMemo(() => {
     if (!selectedNetwork) return [];
-    // The data structure contains the nested network object.
     return allPackages.filter((pkg) => pkg.network.name === selectedNetwork)
       .sort((a, b) => a.price - b.price);
   }, [selectedNetwork, allPackages]);
@@ -86,7 +87,6 @@ export default function Home() {
       return;
     }
     
-    // Add to cart using the original package structure
     addToCart({
       recipientMsisdn: phoneNumber,
       networkId: pkg.network.id,
