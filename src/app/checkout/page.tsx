@@ -35,29 +35,36 @@ export default function CheckoutPage() {
 
         setIsProcessing(true);
 
-        // Process all items in parallel
         const purchasePromises = cartItems.map(item =>
             fetch('/api/buy-bundle', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(item),
             }).then(async response => {
-                const result = await response.json();
                 if (!response.ok) {
-                    // Throw an error to be caught by Promise.allSettled
-                    throw new Error(result.error || `Failed to purchase ${item.dataAmount}`);
+                    const result = await response.json().catch(() => ({ error: 'An unexpected error occurred.' }));
+                    // Use a more specific error from the API response if available
+                    throw new Error(result.error || `HTTP error! status: ${response.status}`);
                 }
-                return { item, result };
+                return response.json();
             })
         );
 
         const results = await Promise.allSettled(purchasePromises);
 
-        let hasFailures = false;
+        let successCount = 0;
+        let failureCount = 0;
+
         results.forEach((result, index) => {
-            if (result.status === 'rejected') {
-                hasFailures = true;
-                const item = cartItems[index];
+            const item = cartItems[index];
+            if (result.status === 'fulfilled') {
+                successCount++;
+                 toast({
+                    title: `Purchase Successful`,
+                    description: `${item.dataAmount} for ${item.recipientMsisdn} was successful.`,
+                });
+            } else {
+                failureCount++;
                 console.error("Purchase error for item:", item.cartId, result.reason);
                 toast({
                     title: `Purchase Failed for ${item.dataAmount}`,
@@ -72,9 +79,9 @@ export default function CheckoutPage() {
         // Refresh user balance regardless of outcome
         if (refreshUser) refreshUser();
 
-        if (!hasFailures) {
+        if (failureCount === 0) {
             toast({
-                title: "Purchase Successful!",
+                title: "All Purchases Successful!",
                 description: "Your data bundles have been sent.",
             });
             clearCart();
@@ -82,12 +89,13 @@ export default function CheckoutPage() {
         } else {
              toast({
                 title: "Some Purchases Failed",
-                description: "Please check your cart and try again for the failed items.",
+                description: `${failureCount} out of ${cartItems.length} bundles could not be purchased. Please check your orders for details.`,
                 variant: "destructive"
             });
-            // Optionally, remove only successful items from cart
-            // clearCart(); // For now, we clear the whole cart. A more complex logic could be implemented.
-             router.push('/orders'); // still navigate to see successful ones
+            // A more complex logic could be to remove only successful items.
+            // For simplicity, we clear the cart and navigate to orders to see what went through.
+            clearCart(); 
+            router.push('/orders');
         }
     }
 

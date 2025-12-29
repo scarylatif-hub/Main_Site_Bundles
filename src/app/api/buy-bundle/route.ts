@@ -14,10 +14,10 @@ export async function POST(req: NextRequest) {
 
   const { recipientMsisdn, networkId, sharedBundle, price, dataAmount } = await req.json();
 
-  if (!recipientMsisdn || !networkId || !sharedBundle || !price || !dataAmount) {
+  if (!recipientMsisdn || !networkId || !sharedBundle || price === undefined || !dataAmount) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
   }
-
+  
   // First, check user's balance
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
@@ -53,17 +53,17 @@ export async function POST(req: NextRequest) {
 
     const result = await response.json();
 
-    if (!response.ok) {
+    if (!response.ok || !result.success) {
         console.error("External API error:", result);
+        const transactionCode = result.transactionCode || `FAILED-${Date.now()}`;
         // Log the transaction with a failed status
         await supabase.rpc('purchase_bundle_and_log_transaction', {
             p_user_id: session.user.id,
             p_amount: price,
-            p_transaction_code: `FAILED-${Date.now()}`,
+            p_transaction_code: transactionCode,
             p_status: 'failed',
             p_recipient_msisdn: recipientMsisdn,
             p_network_id: networkId,
-            p_shared_bundle: sharedBundle,
             p_bundle_amount: dataAmount,
             p_description: `Failed purchase: ${result.message || 'Unknown error'}`
         });
@@ -78,7 +78,6 @@ export async function POST(req: NextRequest) {
         p_status: 'success',
         p_recipient_msisdn: recipientMsisdn,
         p_network_id: networkId,
-        p_shared_bundle: sharedBundle,
         p_bundle_amount: dataAmount,
         p_description: `Purchase of ${dataAmount} for ${recipientMsisdn}`
     });
