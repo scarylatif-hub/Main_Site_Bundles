@@ -234,7 +234,7 @@ export default function Home() {
               </CardContent>
               <CardFooter>
                   <Button 
-                      onClick={() => initializePayment()}
+                      onClick={initializePayment}
                       disabled={!isValidDepositAmount() || !process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY}
                       className="w-full"
                   >
@@ -434,7 +434,3 @@ export default function Home() {
     </div>
   );
 }
-
-    
-
-    
