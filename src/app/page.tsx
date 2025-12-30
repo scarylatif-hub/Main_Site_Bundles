@@ -1,29 +1,110 @@
 
 "use client";
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { PhoneInputForm } from '@/components/phone-input-form';
-import type { NetworkName, Package } from '@/lib/definitions';
+import type { NetworkName, Package, Transaction } from '@/lib/definitions';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Wallet, ShoppingCart } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Wallet, ShoppingCart, Info } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/context/auth-context';
 import { useCart } from '@/hooks/use-cart';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { usePaystackPayment } from 'react-paystack';
+import { useToast } from '@/hooks/use-toast';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { supabase } from '@/lib/supabase/client';
+
 
 const networks: NetworkName[] = ["MTN", "Telecel", "AirtelTigo"];
 
 export default function Home() {
-  const { user, userProfile } = useAuth();
+  const { user, userProfile, refreshUser } = useAuth();
   const { addToCart } = useCart();
+  const { toast } = useToast();
+  
   const [phoneNumber, setPhoneNumber] = useState('');
   const [detectedNetwork, setDetectedNetwork] = useState<NetworkName | null>(null);
   const [selectedNetwork, setSelectedNetwork] = useState<NetworkName | null>(null);
   const [allPackages, setAllPackages] = useState<Package[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  
+  // State for wallet funding
+  const [depositAmount, setDepositAmount] = useState('');
+  const publicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || '';
+
+  // Wallet funding logic
+  const handleDepositSuccess = async (paymentDetails: { amount: number, reference: string }) => {
+    if (!user) return;
+
+    const { error } = await supabase.rpc('add_to_wallet_and_log_transaction', {
+        p_user_id: user.id,
+        p_amount: paymentDetails.amount,
+        p_transaction_type: 'deposit',
+        p_status: 'success',
+        p_transaction_code: paymentDetails.reference,
+        p_description: `Paystack Deposit: ${paymentDetails.reference}`
+    });
+
+    if (error) {
+        console.error('Error updating balance:', error);
+        toast({ title: 'Error', description: 'Failed to update wallet balance.', variant: 'destructive'});
+    } else {
+        toast({
+            title: "Deposit Successful!",
+            description: `GHS ${paymentDetails.amount.toFixed(2)} has been added to your wallet.`
+        });
+        if(refreshUser) refreshUser();
+        setDepositAmount('');
+    }
+  };
+    
+  const handlePaymentSuccess = useCallback((reference: any) => {
+      try {
+          const paymentDetails = {
+              reference: reference.reference,
+              amount: parseFloat(depositAmount),
+          };
+          handleDepositSuccess(paymentDetails);
+      } catch (error) {
+          console.error('Error processing deposit:', error);
+          toast({
+              title: "Error",
+              description: "There was an error processing your deposit. Please contact support.",
+              variant: "destructive"
+          });
+      }
+  }, [depositAmount, handleDepositSuccess, toast]);
+
+  const handlePaymentClose = useCallback(() => {
+      console.log('Payment popup closed');
+  }, []);
+
+  const config = useMemo(() => ({
+      email: user?.email || '',
+      amount: Math.round(parseFloat(depositAmount || '0') * 100),
+      publicKey,
+      currency: 'GHS',
+      reference: `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+  }), [user?.email, depositAmount, publicKey]);
+
+  const initializePayment = usePaystackPayment(config);
+
+  const handleProceedToPayment = () => {
+      if (!isValidDepositAmount()) return;
+      initializePayment(handlePaymentSuccess, handlePaymentClose);
+  };
+
+  const isValidDepositAmount = () => {
+      const numAmount = parseFloat(depositAmount);
+      return !isNaN(numAmount) && numAmount >= 1;
+  };
+
 
   useEffect(() => {
     const fetchPackages = async () => {
@@ -39,7 +120,6 @@ export default function Home() {
         
         const data = await response.json();
 
-        // The API now returns the array directly.
         if (Array.isArray(data)) {
           setAllPackages(data);
         } else {
@@ -49,7 +129,7 @@ export default function Home() {
 
       } catch (error) {
         console.error(error);
-        setAllPackages([]); // Ensure packages are cleared on error
+        setAllPackages([]);
       } finally {
         setIsLoading(false);
       }
@@ -77,7 +157,6 @@ export default function Home() {
     }
     // A robust, case-insensitive filter that also checks for null/undefined values.
     return allPackages.filter((pkg) => {
-      // Safely access pkg.network.name and compare it case-insensitively
       return pkg.network && typeof pkg.network.name === 'string' &&
              pkg.network.name.toLowerCase() === selectedNetwork.toLowerCase();
     }).sort((a, b) => a.price - b.price);
@@ -276,6 +355,69 @@ export default function Home() {
         </Card>
       </motion.div>
 
+      {user && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.2 }}
+          className="mt-8"
+        >
+          <Card>
+              <CardHeader>
+                  <CardTitle>Add Money to Wallet</CardTitle>
+                  <CardDescription>Enter an amount to deposit via our secure payment gateway.</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-6">
+                  {!publicKey ? (
+                      <Alert variant="destructive">
+                          <Info className="h-4 w-4" />
+                          <AlertTitle>Configuration Error</AlertTitle>
+                          <AlertDescription>
+                              Payment gateway is not configured. Please contact support.
+                          </AlertDescription>
+                      </Alert>
+                  ) : (
+                      <>
+                          <div className="grid gap-2">
+                              <Label htmlFor="amount">Amount to Deposit (GHS)</Label>
+                              <Input
+                                  id="amount"
+                                  type="number"
+                                  value={depositAmount}
+                                  onChange={(e) => setDepositAmount(e.target.value)}
+                                  placeholder="Enter amount (min: 1 GHS)"
+                                  min="1"
+                                  step="0.01"
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                  Minimum deposit: 1 GHS
+                              </p>
+                          </div>
+                          {depositAmount && isValidDepositAmount() && (
+                              <Alert variant="default" className="bg-success/10 border-success/30">
+                                  <AlertTitle className='text-success'>Payment Preview</AlertTitle>
+                                  <AlertDescription className="flex justify-between items-center text-foreground">
+                                      <span>You will pay:</span>
+                                      <span className="font-bold text-lg">GHS {parseFloat(depositAmount).toFixed(2)}</span>
+                                  </AlertDescription>
+                              </Alert>
+                          )}
+                      </>
+                  )}
+              </CardContent>
+              <CardFooter>
+                  <Button 
+                      onClick={handleProceedToPayment}
+                      disabled={!isValidDepositAmount() || !publicKey}
+                      className="w-full"
+                  >
+                      Proceed to Payment
+                  </Button>
+              </CardFooter>
+          </Card>
+        </motion.div>
+      )}
+
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -313,3 +455,5 @@ export default function Home() {
     </div>
   );
 }
+
+    
