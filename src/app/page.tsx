@@ -1,9 +1,10 @@
 
 "use client";
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { usePaystackPayment } from 'react-paystack';
 import { PhoneInputForm } from '@/components/phone-input-form';
-import type { NetworkName, Package, Transaction } from '@/lib/definitions';
+import type { NetworkName, Package } from '@/lib/definitions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Wallet, ShoppingCart, Info } from 'lucide-react';
@@ -18,10 +19,57 @@ import { Label } from "@/components/ui/label";
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { supabase } from '@/lib/supabase/client';
-import { usePaystack } from '@/hooks/use-paystack';
-
 
 const networks: NetworkName[] = ["MTN", "Telecel", "AirtelTigo"];
+
+// This is a new component that correctly encapsulates the Paystack hook
+const PaystackPaymentButton = ({ email, amount, onSuccessfulPayment }: { email: string, amount: number, onSuccessfulPayment: (ref: any) => void }) => {
+    const { toast } = useToast();
+    
+    const config = {
+        reference: `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        email: email,
+        amount: Math.round(amount * 100), // Amount in pesewas
+        publicKey: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || '',
+        currency: 'GHS' as const,
+    };
+
+    const initializePayment = usePaystackPayment(config);
+
+    const handlePayment = () => {
+        if (!config.publicKey) {
+            toast({
+                title: "Configuration Error",
+                description: "Payment gateway is not configured.",
+                variant: "destructive",
+            });
+            return;
+        }
+        if (config.amount <= 100) { // min 1 GHS
+             toast({
+                title: "Invalid Amount",
+                description: "Minimum deposit is 1 GHS.",
+                variant: "destructive",
+            });
+            return;
+        }
+        initializePayment({ 
+            onSuccess: onSuccessfulPayment, 
+            onClose: () => { /* User closed the modal */ }
+        });
+    }
+
+    return (
+        <Button
+            onClick={handlePayment}
+            disabled={!email || !amount || !config.publicKey}
+            className="w-full"
+        >
+            Proceed to Payment
+        </Button>
+    )
+}
+
 
 export default function Home() {
   const { user, userProfile, refreshUser } = useAuth();
@@ -34,7 +82,6 @@ export default function Home() {
   const [allPackages, setAllPackages] = useState<Package[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
-  // State for wallet funding
   const [depositAmount, setDepositAmount] = useState('');
 
   const handleDepositSuccess = async (reference: any) => {
@@ -62,54 +109,24 @@ export default function Home() {
         setDepositAmount('');
     }
   };
-
-  const { initializePayment } = usePaystack({
-    email: user?.email || '',
-    onSuccess: handleDepositSuccess,
-    onClose: () => console.log('Payment popup closed.'),
-  });
-
-
-  const isValidDepositAmount = () => {
-      const numAmount = parseFloat(depositAmount);
-      return !isNaN(numAmount) && numAmount >= 1;
-  };
-
-  const handleProceedToPayment = () => {
-      const amount = parseFloat(depositAmount);
-      if (isValidDepositAmount()) {
-        initializePayment(amount);
-      } else {
-        toast({
-            title: "Invalid Amount",
-            description: "Please enter a valid amount to deposit (min: 1 GHS).",
-            variant: "destructive"
-        });
-      }
-  }
-
-
+  
   useEffect(() => {
     const fetchPackages = async () => {
       try {
         setIsLoading(true);
         const response = await fetch('/api/packages');
-        
         if (!response.ok) {
           const errorText = await response.text();
           console.error("Failed to fetch packages. Status:", response.status, "Body:", errorText);
           throw new Error('Failed to fetch packages');
         }
-        
         const data = await response.json();
-        
-        if (Array.isArray(data)) {
+        if (data && Array.isArray(data)) {
           setAllPackages(data);
         } else {
            console.error("Unexpected data structure from API:", data);
            setAllPackages([]);
         }
-
       } catch (error) {
         console.error(error);
         setAllPackages([]);
@@ -117,10 +134,8 @@ export default function Home() {
         setIsLoading(false);
       }
     };
-
     fetchPackages();
   }, []);
-
 
   const handlePhoneNumberChange = (number: string, network: NetworkName | null) => {
     setPhoneNumber(number);
@@ -139,11 +154,10 @@ export default function Home() {
       return [];
     }
     return allPackages
-      .filter((pkg) => {
-        const pkgNetworkName = pkg.network?.name;
-        if (!pkgNetworkName) return false;
-        return pkgNetworkName.toLowerCase() === selectedNetwork.toLowerCase();
-      })
+      .filter((pkg) => 
+        pkg.network && pkg.network.name && selectedNetwork &&
+        pkg.network.name.toLowerCase() === selectedNetwork.toLowerCase()
+      )
       .sort((a, b) => a.price - b.price);
   }, [selectedNetwork, allPackages]);
 
@@ -175,10 +189,14 @@ export default function Home() {
     });
   };
   
-    // Helper function to validate phone number.
     const validatePhoneNumber = (phone: string): boolean => {
         return /^0(20|50|24|54|55|59|27|57|26|56)\d{7}$/.test(phone);
     }
+    
+    const isValidDepositAmount = () => {
+      const numAmount = parseFloat(depositAmount);
+      return !isNaN(numAmount) && numAmount >= 1;
+    };
 
   return (
     <div className="container mx-auto max-w-4xl px-4 py-8 sm:py-12">
@@ -234,7 +252,7 @@ export default function Home() {
                                   Minimum deposit: 1 GHS
                               </p>
                           </div>
-                          {depositAmount && isValidDepositAmount() && (
+                          {isValidDepositAmount() && (
                               <Alert variant="default" className="bg-success/10 border-success/30">
                                   <AlertTitle className='text-success'>Payment Preview</AlertTitle>
                                   <AlertDescription className="flex justify-between items-center text-foreground">
@@ -247,13 +265,11 @@ export default function Home() {
                   )}
               </CardContent>
               <CardFooter>
-                  <Button 
-                      onClick={handleProceedToPayment}
-                      disabled={!isValidDepositAmount() || !process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY}
-                      className="w-full"
-                  >
-                      Proceed to Payment
-                  </Button>
+                 <PaystackPaymentButton 
+                    email={user.email || ''}
+                    amount={parseFloat(depositAmount)}
+                    onSuccessfulPayment={handleDepositSuccess}
+                 />
               </CardFooter>
           </Card>
         </motion.div>
@@ -448,3 +464,5 @@ export default function Home() {
     </div>
   );
 }
+
+    
