@@ -65,7 +65,6 @@ export default function Home() {
 
   const { initializePayment } = usePaystack({
     email: user?.email || '',
-    amount: parseFloat(depositAmount || '0'),
     onSuccess: handleDepositSuccess,
     onClose: () => console.log('Payment popup closed.'),
   });
@@ -75,6 +74,19 @@ export default function Home() {
       const numAmount = parseFloat(depositAmount);
       return !isNaN(numAmount) && numAmount >= 1;
   };
+
+  const handleProceedToPayment = () => {
+      const amount = parseFloat(depositAmount);
+      if (isValidDepositAmount()) {
+        initializePayment(amount);
+      } else {
+        toast({
+            title: "Invalid Amount",
+            description: "Please enter a valid amount to deposit (min: 1 GHS).",
+            variant: "destructive"
+        });
+      }
+  }
 
 
   useEffect(() => {
@@ -126,12 +138,14 @@ export default function Home() {
     if (!selectedNetwork) {
       return [];
     }
-    return allPackages.filter((pkg) => 
-        pkg.network && 
-        typeof pkg.network.name === 'string' &&
-        pkg.network.name.toLowerCase() === selectedNetwork.toLowerCase()
-    ).sort((a, b) => a.price - b.price);
-}, [selectedNetwork, allPackages]);
+    return allPackages
+      .filter((pkg) => {
+        const pkgNetworkName = pkg.network?.name;
+        if (!pkgNetworkName) return false;
+        return pkgNetworkName.toLowerCase() === selectedNetwork.toLowerCase();
+      })
+      .sort((a, b) => a.price - b.price);
+  }, [selectedNetwork, allPackages]);
 
   const handleBuyPackage = (pkg: Package) => {
     if (!user) {
@@ -234,7 +248,7 @@ export default function Home() {
               </CardContent>
               <CardFooter>
                   <Button 
-                      onClick={initializePayment}
+                      onClick={handleProceedToPayment}
                       disabled={!isValidDepositAmount() || !process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY}
                       className="w-full"
                   >

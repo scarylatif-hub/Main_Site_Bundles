@@ -3,31 +3,28 @@
 
 import { usePaystackPayment } from 'react-paystack';
 import { useToast } from '@/hooks/use-toast';
-import { useMemo } from 'react';
+import { useCallback } from 'react';
 
 interface UsePaystackProps {
     email: string;
-    amount: number; // in GHS
     onSuccess: (reference: any) => void;
     onClose: () => void;
 }
 
-export const usePaystack = ({ email, amount, onSuccess, onClose }: UsePaystackProps) => {
+export const usePaystack = ({ email, onSuccess, onClose }: UsePaystackProps) => {
     const { toast } = useToast();
     
     const publicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || '';
 
-    const config = useMemo(() => ({
+    const initializePaystack = usePaystackPayment({
         reference: `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         email,
-        amount: Math.round(amount * 100), // Paystack amount is in pesewas
+        amount: 0, // This will be updated
         publicKey,
         currency: 'GHS',
-    }), [email, amount, publicKey]);
+    });
 
-    const initializePayment = usePaystackPayment(config);
-
-    const safeInitializePayment = () => {
+    const initializePayment = useCallback((amount: number) => {
         if (!publicKey) {
             console.error("Paystack public key is not set. Please set NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY in your .env file.");
             toast({
@@ -46,11 +43,21 @@ export const usePaystack = ({ email, amount, onSuccess, onClose }: UsePaystackPr
             });
             return;
         }
+
+        const config = {
+            reference: `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            email,
+            amount: Math.round(amount * 100), // Paystack amount is in pesewas
+            publicKey,
+            currency: 'GHS',
+            onSuccess,
+            onClose
+        }
         
-        initializePayment({ onSuccess, onClose });
-    };
+        // The usePaystackPayment hook's return function can take a config override
+        initializePaystack(config);
+    }, [publicKey, email, toast, initializePaystack, onSuccess, onClose]);
 
-    return { initializePayment: safeInitializePayment };
+
+    return { initializePayment };
 };
-
-    
