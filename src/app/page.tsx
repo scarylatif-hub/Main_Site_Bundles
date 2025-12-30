@@ -15,10 +15,10 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { usePaystackPayment } from 'react-paystack';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { supabase } from '@/lib/supabase/client';
+import { usePaystack } from '@/hooks/use-paystack';
 
 
 const networks: NetworkName[] = ["MTN", "Telecel", "AirtelTigo"];
@@ -36,19 +36,18 @@ export default function Home() {
   
   // State for wallet funding
   const [depositAmount, setDepositAmount] = useState('');
-  const publicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || '';
 
-  // Wallet funding logic
-  const handleDepositSuccess = async (paymentDetails: { amount: number, reference: string }) => {
+  const handleDepositSuccess = async (reference: any) => {
     if (!user) return;
+    const amount = parseFloat(depositAmount);
 
     const { error } = await supabase.rpc('add_to_wallet_and_log_transaction', {
         p_user_id: user.id,
-        p_amount: paymentDetails.amount,
+        p_amount: amount,
         p_transaction_type: 'deposit',
         p_status: 'success',
-        p_transaction_code: paymentDetails.reference,
-        p_description: `Paystack Deposit: ${paymentDetails.reference}`
+        p_transaction_code: reference.reference,
+        p_description: `Paystack Deposit: ${reference.reference}`
     });
 
     if (error) {
@@ -57,48 +56,20 @@ export default function Home() {
     } else {
         toast({
             title: "Deposit Successful!",
-            description: `GHS ${paymentDetails.amount.toFixed(2)} has been added to your wallet.`
+            description: `GHS ${amount.toFixed(2)} has been added to your wallet.`
         });
         if(refreshUser) refreshUser();
         setDepositAmount('');
     }
   };
-    
-  const handlePaymentSuccess = useCallback((reference: any) => {
-      try {
-          const paymentDetails = {
-              reference: reference.reference,
-              amount: parseFloat(depositAmount),
-          };
-          handleDepositSuccess(paymentDetails);
-      } catch (error) {
-          console.error('Error processing deposit:', error);
-          toast({
-              title: "Error",
-              description: "There was an error processing your deposit. Please contact support.",
-              variant: "destructive"
-          });
-      }
-  }, [depositAmount, handleDepositSuccess, toast]);
 
-  const handlePaymentClose = useCallback(() => {
-      console.log('Payment popup closed');
-  }, []);
+  const { initializePayment } = usePaystack({
+    email: user?.email || '',
+    amount: parseFloat(depositAmount || '0'),
+    onSuccess: handleDepositSuccess,
+    onClose: () => console.log('Payment popup closed.'),
+  });
 
-  const config = useMemo(() => ({
-      email: user?.email || '',
-      amount: Math.round(parseFloat(depositAmount || '0') * 100),
-      publicKey,
-      currency: 'GHS',
-      reference: `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-  }), [user?.email, depositAmount, publicKey]);
-
-  const initializePayment = usePaystackPayment(config);
-
-  const handleProceedToPayment = () => {
-      if (!isValidDepositAmount()) return;
-      initializePayment(handlePaymentSuccess, handlePaymentClose);
-  };
 
   const isValidDepositAmount = () => {
       const numAmount = parseFloat(depositAmount);
@@ -155,11 +126,12 @@ export default function Home() {
     if (!selectedNetwork) {
       return [];
     }
-    return allPackages.filter((pkg) => {
-      return pkg.network && typeof pkg.network.name === 'string' &&
-             pkg.network.name.toLowerCase() === selectedNetwork.toLowerCase();
-    }).sort((a, b) => a.price - b.price);
-  }, [selectedNetwork, allPackages]);
+    return allPackages.filter((pkg) => 
+        pkg.network && 
+        typeof pkg.network.name === 'string' &&
+        pkg.network.name.toLowerCase() === selectedNetwork.toLowerCase()
+    ).sort((a, b) => a.price - b.price);
+}, [selectedNetwork, allPackages]);
 
   const handleBuyPackage = (pkg: Package) => {
     if (!user) {
@@ -182,7 +154,7 @@ export default function Home() {
     addToCart({
       recipientMsisdn: phoneNumber,
       networkId: pkg.network.id,
-      networkName: pkg.network.name,
+      networkName: pkg.network.name as NetworkName,
       sharedBundle: pkg.sharedBundle,
       price: pkg.price,
       dataAmount: pkg.dataAmount,
@@ -223,7 +195,7 @@ export default function Home() {
                   <CardDescription>Enter an amount to deposit via our secure payment gateway.</CardDescription>
               </CardHeader>
               <CardContent className="grid gap-6">
-                  {!publicKey ? (
+                  {!process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY ? (
                       <Alert variant="destructive">
                           <Info className="h-4 w-4" />
                           <AlertTitle>Configuration Error</AlertTitle>
@@ -262,8 +234,8 @@ export default function Home() {
               </CardContent>
               <CardFooter>
                   <Button 
-                      onClick={handleProceedToPayment}
-                      disabled={!isValidDepositAmount() || !publicKey}
+                      onClick={() => initializePayment()}
+                      disabled={!isValidDepositAmount() || !process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY}
                       className="w-full"
                   >
                       Proceed to Payment
@@ -462,5 +434,7 @@ export default function Home() {
     </div>
   );
 }
+
+    
 
     
