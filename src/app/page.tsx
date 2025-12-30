@@ -119,12 +119,12 @@ export default function Home() {
         }
         
         const data = await response.json();
-
+        
         if (Array.isArray(data)) {
           setAllPackages(data);
         } else {
-          console.error("Unexpected data structure from API:", data);
-          setAllPackages([]);
+           console.error("Unexpected data structure from API:", data);
+           setAllPackages([]);
         }
 
       } catch (error) {
@@ -155,7 +155,6 @@ export default function Home() {
     if (!selectedNetwork) {
       return [];
     }
-    // A robust, case-insensitive filter that also checks for null/undefined values.
     return allPackages.filter((pkg) => {
       return pkg.network && typeof pkg.network.name === 'string' &&
              pkg.network.name.toLowerCase() === selectedNetwork.toLowerCase();
@@ -164,11 +163,19 @@ export default function Home() {
 
   const handleBuyPackage = (pkg: Package) => {
     if (!user) {
-      alert('Please login to purchase');
+      toast({
+        title: "Please Login",
+        description: "You need to be logged in to purchase a package.",
+        variant: "destructive"
+      });
       return;
     }
     if (!phoneNumber || !validatePhoneNumber(phoneNumber)) {
-      alert('Please enter a valid phone number');
+      toast({
+        title: "Invalid Phone Number",
+        description: "Please enter a valid phone number before buying.",
+        variant: "destructive"
+      });
       return;
     }
     
@@ -203,10 +210,73 @@ export default function Home() {
         </p>
       </motion.div>
 
+       {user && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.1 }}
+          className="mb-8"
+        >
+          <Card>
+              <CardHeader>
+                  <CardTitle>Add Money to Wallet</CardTitle>
+                  <CardDescription>Enter an amount to deposit via our secure payment gateway.</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-6">
+                  {!publicKey ? (
+                      <Alert variant="destructive">
+                          <Info className="h-4 w-4" />
+                          <AlertTitle>Configuration Error</AlertTitle>
+                          <AlertDescription>
+                              Payment gateway is not configured. Please contact support.
+                          </AlertDescription>
+                      </Alert>
+                  ) : (
+                      <>
+                          <div className="grid gap-2">
+                              <Label htmlFor="amount">Amount to Deposit (GHS)</Label>
+                              <Input
+                                  id="amount"
+                                  type="number"
+                                  value={depositAmount}
+                                  onChange={(e) => setDepositAmount(e.target.value)}
+                                  placeholder="Enter amount (min: 1 GHS)"
+                                  min="1"
+                                  step="0.01"
+                              />
+                              <p className="text-xs text-muted-foreground">
+                                  Minimum deposit: 1 GHS
+                              </p>
+                          </div>
+                          {depositAmount && isValidDepositAmount() && (
+                              <Alert variant="default" className="bg-success/10 border-success/30">
+                                  <AlertTitle className='text-success'>Payment Preview</AlertTitle>
+                                  <AlertDescription className="flex justify-between items-center text-foreground">
+                                      <span>You will pay:</span>
+                                      <span className="font-bold text-lg">GHS {parseFloat(depositAmount).toFixed(2)}</span>
+                                  </AlertDescription>
+                              </Alert>
+                          )}
+                      </>
+                  )}
+              </CardContent>
+              <CardFooter>
+                  <Button 
+                      onClick={handleProceedToPayment}
+                      disabled={!isValidDepositAmount() || !publicKey}
+                      className="w-full"
+                  >
+                      Proceed to Payment
+                  </Button>
+              </CardFooter>
+          </Card>
+        </motion.div>
+      )}
+
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.5, delay: 0.1 }}
+        transition={{ duration: 0.5, delay: 0.2 }}
       >
         <Card className="shadow-lg">
           <CardHeader className="space-y-4">
@@ -354,69 +424,6 @@ export default function Home() {
           </CardContent>
         </Card>
       </motion.div>
-
-      {user && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
-          className="mt-8"
-        >
-          <Card>
-              <CardHeader>
-                  <CardTitle>Add Money to Wallet</CardTitle>
-                  <CardDescription>Enter an amount to deposit via our secure payment gateway.</CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-6">
-                  {!publicKey ? (
-                      <Alert variant="destructive">
-                          <Info className="h-4 w-4" />
-                          <AlertTitle>Configuration Error</AlertTitle>
-                          <AlertDescription>
-                              Payment gateway is not configured. Please contact support.
-                          </AlertDescription>
-                      </Alert>
-                  ) : (
-                      <>
-                          <div className="grid gap-2">
-                              <Label htmlFor="amount">Amount to Deposit (GHS)</Label>
-                              <Input
-                                  id="amount"
-                                  type="number"
-                                  value={depositAmount}
-                                  onChange={(e) => setDepositAmount(e.target.value)}
-                                  placeholder="Enter amount (min: 1 GHS)"
-                                  min="1"
-                                  step="0.01"
-                              />
-                              <p className="text-xs text-muted-foreground">
-                                  Minimum deposit: 1 GHS
-                              </p>
-                          </div>
-                          {depositAmount && isValidDepositAmount() && (
-                              <Alert variant="default" className="bg-success/10 border-success/30">
-                                  <AlertTitle className='text-success'>Payment Preview</AlertTitle>
-                                  <AlertDescription className="flex justify-between items-center text-foreground">
-                                      <span>You will pay:</span>
-                                      <span className="font-bold text-lg">GHS {parseFloat(depositAmount).toFixed(2)}</span>
-                                  </AlertDescription>
-                              </Alert>
-                          )}
-                      </>
-                  )}
-              </CardContent>
-              <CardFooter>
-                  <Button 
-                      onClick={handleProceedToPayment}
-                      disabled={!isValidDepositAmount() || !publicKey}
-                      className="w-full"
-                  >
-                      Proceed to Payment
-                  </Button>
-              </CardFooter>
-          </Card>
-        </motion.div>
-      )}
 
       <motion.div
         initial={{ opacity: 0 }}
