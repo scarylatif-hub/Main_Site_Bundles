@@ -2,7 +2,6 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { usePaystackPayment } from 'react-paystack';
 import { PhoneInputForm } from '@/components/phone-input-form';
 import type { NetworkName, Package } from '@/lib/definitions';
 import { Button } from '@/components/ui/button';
@@ -19,56 +18,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { supabase } from '@/lib/supabase/client';
-
-const networks: NetworkName[] = ["MTN", "Telecel", "AirtelTigo"];
-
-// This is a new component that correctly encapsulates the Paystack hook
-const PaystackPaymentButton = ({ email, amount, onSuccessfulPayment }: { email: string, amount: number, onSuccessfulPayment: (ref: any) => void }) => {
-    const { toast } = useToast();
-    
-    const config = {
-        reference: `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        email: email,
-        amount: Math.round(amount * 100), // Amount in pesewas
-        publicKey: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || '',
-        currency: 'GHS' as const,
-    };
-
-    const initializePayment = usePaystackPayment(config);
-
-    const handlePayment = () => {
-        if (!config.publicKey) {
-            toast({
-                title: "Configuration Error",
-                description: "Payment gateway is not configured.",
-                variant: "destructive",
-            });
-            return;
-        }
-        if (config.amount <= 100) { // min 1 GHS
-             toast({
-                title: "Invalid Amount",
-                description: "Minimum deposit is 1 GHS.",
-                variant: "destructive",
-            });
-            return;
-        }
-        initializePayment({ 
-            onSuccess: onSuccessfulPayment, 
-            onClose: () => { /* User closed the modal */ }
-        });
-    }
-
-    return (
-        <Button
-            onClick={handlePayment}
-            disabled={!email || !amount || !config.publicKey}
-            className="w-full"
-        >
-            Proceed to Payment
-        </Button>
-    )
-}
+import { usePaystack } from '@/hooks/use-paystack';
 
 
 export default function Home() {
@@ -109,6 +59,12 @@ export default function Home() {
         setDepositAmount('');
     }
   };
+
+  const { initializePayment } = usePaystack({
+    email: user?.email ?? '',
+    onSuccess: handleDepositSuccess,
+    onClose: () => { /* User closed the modal */ }
+  });
   
   useEffect(() => {
     const fetchPackages = async () => {
@@ -121,8 +77,10 @@ export default function Home() {
           throw new Error('Failed to fetch packages');
         }
         const data = await response.json();
-        if (data && Array.isArray(data)) {
-          setAllPackages(data);
+         if (data && Array.isArray(data.packages)) {
+            setAllPackages(data.packages);
+        } else if (Array.isArray(data)) {
+            setAllPackages(data);
         } else {
            console.error("Unexpected data structure from API:", data);
            setAllPackages([]);
@@ -198,6 +156,8 @@ export default function Home() {
       return !isNaN(numAmount) && numAmount >= 1;
     };
 
+    const networks: NetworkName[] = ["MTN", "Telecel", "AirtelTigo"];
+
   return (
     <div className="container mx-auto max-w-4xl px-4 py-8 sm:py-12">
       <motion.div
@@ -265,11 +225,13 @@ export default function Home() {
                   )}
               </CardContent>
               <CardFooter>
-                 <PaystackPaymentButton 
-                    email={user.email || ''}
-                    amount={parseFloat(depositAmount)}
-                    onSuccessfulPayment={handleDepositSuccess}
-                 />
+                 <Button
+                    onClick={() => initializePayment(parseFloat(depositAmount))}
+                    disabled={!user?.email || !isValidDepositAmount() || !process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY}
+                    className="w-full"
+                >
+                    Proceed to Payment
+                </Button>
               </CardFooter>
           </Card>
         </motion.div>
@@ -464,5 +426,3 @@ export default function Home() {
     </div>
   );
 }
-
-    
