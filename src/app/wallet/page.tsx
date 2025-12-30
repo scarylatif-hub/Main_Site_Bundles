@@ -1,10 +1,11 @@
+
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { PlusCircle, Wallet as WalletIcon, ArrowDownCircle, ArrowUpCircle, Info, X } from "lucide-react";
+import { Wallet as WalletIcon, ArrowDownCircle, ArrowUpCircle, Info } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
@@ -14,152 +15,14 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useAuth } from '@/context/auth-context';
 import { supabase } from '@/lib/supabase/client';
 import type { Transaction } from '@/lib/definitions';
-import { AnimatePresence, motion } from "framer-motion";
-
-interface PaystackDepositFormProps {
-    userEmail: string;
-    onSuccess: (details: any) => void;
-    onClose: () => void;
-    currentBalance: number;
-}
-
-function PaystackDepositForm({ userEmail, onSuccess, onClose }: PaystackDepositFormProps) {
-    const [amount, setAmount] = useState('');
-    const { toast } = useToast();
-
-    const publicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || '';
-
-    // Callback handlers
-    const handlePaymentSuccess = useCallback((reference: any) => {
-        try {
-            const paymentDetails = {
-                reference: reference.reference,
-                amount: parseFloat(amount),
-            };
-            onSuccess(paymentDetails);
-            setAmount('');
-        } catch (error) {
-            console.error('Error processing deposit:', error);
-            toast({
-                title: "Error",
-                description: "There was an error processing your deposit. Please contact support.",
-                variant: "destructive"
-            });
-        }
-    }, [amount, onSuccess, toast]);
-
-    const handlePaymentClose = useCallback(() => {
-        console.log('Payment popup closed');
-        // Don't close the form here, let user decide
-    }, []);
-
-    // Configuration for Paystack
-    const config = useMemo(() => ({
-        email: userEmail,
-        amount: Math.round(parseFloat(amount || '0') * 100),
-        publicKey,
-        currency: 'GHS',
-        reference: `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-    }), [userEmail, amount, publicKey]);
-
-    // Initialize the payment hook
-    const initializePayment = usePaystackPayment(config);
-
-    const handleProceedToPayment = () => {
-        if (!isValidAmount()) return;
-        
-        // Call initializePayment with callback functions
-        initializePayment(handlePaymentSuccess, handlePaymentClose);
-    };
-
-    const isValidAmount = () => {
-        const numAmount = parseFloat(amount);
-        return !isNaN(numAmount) && numAmount >= 1;
-    };
-
-    if (!publicKey) {
-         return (
-             <Alert variant="destructive">
-                 <Info className="h-4 w-4" />
-                 <AlertTitle>Configuration Error</AlertTitle>
-                 <AlertDescription>
-                    Payment gateway is not configured. Please contact support.
-                 </AlertDescription>
-             </Alert>
-         );
-    }
-
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.3 }}
-        >
-            <Card>
-                <CardHeader>
-                    <div className="flex justify-between items-center">
-                        <CardTitle>Add Money to Wallet</CardTitle>
-                        <Button variant="ghost" size="icon" onClick={onClose}>
-                            <X className="h-4 w-4" />
-                        </Button>
-                    </div>
-                    <CardDescription>Enter an amount to deposit via our secure payment gateway.</CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-6">
-                     <div className="grid gap-2">
-                        <Label htmlFor="amount">Amount to Deposit (GHS)</Label>
-                        <Input
-                            id="amount"
-                            type="number"
-                            value={amount}
-                            onChange={(e) => setAmount(e.target.value)}
-                            placeholder="Enter amount (min: 1 GHS)"
-                            min="1"
-                            step="0.01"
-                        />
-                        <p className="text-xs text-muted-foreground">
-                            Minimum deposit: 1 GHS
-                        </p>
-                    </div>
-                     {amount && isValidAmount() && (
-                        <Alert variant="default" className="bg-success/10 border-success/30">
-                            <AlertTitle className='text-success'>Payment Preview</AlertTitle>
-                            <AlertDescription className="flex justify-between items-center text-foreground">
-                                <span>You will pay:</span>
-                                <span className="font-bold text-lg">GHS {parseFloat(amount).toFixed(2)}</span>
-                            </AlertDescription>
-                        </Alert>
-                    )}
-                </CardContent>
-                <CardFooter className="flex-col items-stretch gap-4">
-                     <Button 
-                        onClick={handleProceedToPayment}
-                        disabled={!isValidAmount()}
-                        className="w-full"
-                    >
-                        Proceed to Payment
-                    </Button>
-                     <Card className="bg-muted/50">
-                        <CardContent className="p-3">
-                            <ul className="text-xs text-muted-foreground space-y-1">
-                                <li className='flex items-center gap-2'>✓ Secure payment via Paystack</li>
-                                <li className='flex items-center gap-2'>✓ Supports Cards & Mobile Money</li>
-                                <li className='flex items-center gap-2'>✓ Instant wallet credit</li>
-                            </ul>
-                        </CardContent>
-                    </Card>
-                </CardFooter>
-            </Card>
-        </motion.div>
-    );
-}
 
 export default function WalletPage() {
     const { user, loading, refreshUser, userProfile } = useAuth();
     const [transactions, setTransactions] = useState<Transaction[]>([]);
-    const [showDepositForm, setShowDepositForm] = useState(false);
+    const [amount, setAmount] = useState('');
     const { toast } = useToast();
+
+    const publicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || '';
 
     const fetchTransactions = useCallback(async () => {
         if (!user) return;
@@ -207,9 +70,51 @@ export default function WalletPage() {
             });
             if(refreshUser) refreshUser();
             fetchTransactions();
-            setShowDepositForm(false);
+            setAmount('');
         }
     };
+    
+    const handlePaymentSuccess = useCallback((reference: any) => {
+        try {
+            const paymentDetails = {
+                reference: reference.reference,
+                amount: parseFloat(amount),
+            };
+            handleDepositSuccess(paymentDetails);
+        } catch (error) {
+            console.error('Error processing deposit:', error);
+            toast({
+                title: "Error",
+                description: "There was an error processing your deposit. Please contact support.",
+                variant: "destructive"
+            });
+        }
+    }, [amount, handleDepositSuccess, toast]);
+
+    const handlePaymentClose = useCallback(() => {
+        console.log('Payment popup closed');
+    }, []);
+
+    const config = useMemo(() => ({
+        email: user?.email || '',
+        amount: Math.round(parseFloat(amount || '0') * 100),
+        publicKey,
+        currency: 'GHS',
+        reference: `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    }), [user?.email, amount, publicKey]);
+
+    const initializePayment = usePaystackPayment(config);
+
+    const handleProceedToPayment = () => {
+        if (!isValidAmount()) return;
+        initializePayment(handlePaymentSuccess, handlePaymentClose);
+    };
+
+    const isValidAmount = () => {
+        const numAmount = parseFloat(amount);
+        return !isNaN(numAmount) && numAmount >= 1;
+    };
+
 
     if (loading) {
         return (
@@ -246,23 +151,61 @@ export default function WalletPage() {
                         <CardContent>
                             <p className="text-4xl font-bold">GHS {userProfile?.wallet_balance?.toFixed(2) || '0.00'}</p>
                         </CardContent>
+                    </Card>
+                    
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Add Money to Wallet</CardTitle>
+                            <CardDescription>Enter an amount to deposit via our secure payment gateway.</CardDescription>
+                        </CardHeader>
+                        <CardContent className="grid gap-6">
+                            {!publicKey ? (
+                                <Alert variant="destructive">
+                                    <Info className="h-4 w-4" />
+                                    <AlertTitle>Configuration Error</AlertTitle>
+                                    <AlertDescription>
+                                        Payment gateway is not configured. Please contact support.
+                                    </AlertDescription>
+                                </Alert>
+                            ) : (
+                                <>
+                                    <div className="grid gap-2">
+                                        <Label htmlFor="amount">Amount to Deposit (GHS)</Label>
+                                        <Input
+                                            id="amount"
+                                            type="number"
+                                            value={amount}
+                                            onChange={(e) => setAmount(e.target.value)}
+                                            placeholder="Enter amount (min: 1 GHS)"
+                                            min="1"
+                                            step="0.01"
+                                        />
+                                        <p className="text-xs text-muted-foreground">
+                                            Minimum deposit: 1 GHS
+                                        </p>
+                                    </div>
+                                    {amount && isValidAmount() && (
+                                        <Alert variant="default" className="bg-success/10 border-success/30">
+                                            <AlertTitle className='text-success'>Payment Preview</AlertTitle>
+                                            <AlertDescription className="flex justify-between items-center text-foreground">
+                                                <span>You will pay:</span>
+                                                <span className="font-bold text-lg">GHS {parseFloat(amount).toFixed(2)}</span>
+                                            </AlertDescription>
+                                        </Alert>
+                                    )}
+                                </>
+                            )}
+                        </CardContent>
                         <CardFooter>
-                            <Button className="w-full" onClick={() => setShowDepositForm(true)} disabled={showDepositForm}>
-                                <PlusCircle className="mr-2 h-4 w-4" /> Add Money
+                            <Button 
+                                onClick={handleProceedToPayment}
+                                disabled={!isValidAmount() || !publicKey}
+                                className="w-full"
+                            >
+                                Proceed to Payment
                             </Button>
                         </CardFooter>
                     </Card>
-                    
-                    <AnimatePresence>
-                    {showDepositForm && (
-                         <PaystackDepositForm 
-                            userEmail={user.email!} 
-                            onSuccess={handleDepositSuccess}
-                            onClose={() => setShowDepositForm(false)}
-                            currentBalance={userProfile?.wallet_balance || 0}
-                        />
-                    )}
-                    </AnimatePresence>
 
                 </div>
                 <div className="md:col-span-2">
