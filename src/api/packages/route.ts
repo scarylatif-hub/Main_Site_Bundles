@@ -1,13 +1,13 @@
 
 import { NextResponse } from 'next/server';
 
-export const dynamic = 'force-dynamic'; // Prevents caching issues
+export const dynamic = 'force-dynamic'; 
 
 export async function GET() {
   const apiKey = process.env.CHEAP_BUNDLES_API_KEY;
 
   if (!apiKey) {
-    console.error('API key is not configured');
+    console.error('API key (CHEAP_BUNDLES_API_KEY) is not configured');
     return NextResponse.json(
       { error: 'Internal server error: API key missing' }, 
       { status: 500 }
@@ -33,17 +33,24 @@ export async function GET() {
         `External API error: ${response.status} ${response.statusText}`,
         errorBody
       );
-      // Forward the external API's error response
-      return new NextResponse(errorBody, { status: response.status });
+      return NextResponse.json(
+        { 
+          error: 'Failed to fetch packages from external source.',
+          statusCode: response.status,
+          details: errorBody
+        },
+        { status: response.status }
+      );
     }
 
-    // Pass the raw JSON response directly to the client
     const data = await response.json();
     
+    // The external API may return an object with a `packages` key or just an array.
     if (data && Array.isArray(data.packages)) {
       return NextResponse.json(data.packages);
     }
     
+    // Handle case where the root object is the array of packages
     if (Array.isArray(data)) {
         return NextResponse.json(data);
     }
