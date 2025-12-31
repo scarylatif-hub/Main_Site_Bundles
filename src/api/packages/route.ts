@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const apiKey = process.env.CHEAP_BUNDLES_API_KEY;
+  const apiKey = 'FMKEqXONsfQxcE5I6MAkUboGHxTQQbUDNi2sucGIARc';
 
   if (!apiKey) {
     console.error('API key is not configured');
@@ -38,12 +38,10 @@ export async function GET() {
     
     const data = await response.json();
 
-    // According to documentation, the response is { "packages": [...] }
     if (data && Array.isArray(data.packages)) {
       return NextResponse.json(data.packages);
     }
     
-    // Fallback for cases where API might return a raw array
     if (Array.isArray(data)) {
         return NextResponse.json(data);
     }
