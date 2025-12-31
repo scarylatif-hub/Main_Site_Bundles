@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Insufficient funds. Please top up your wallet.' }, { status: 400 });
   }
 
-  const apiKey = process.env.CHEAP_BUNDLES_API_KEY;
+  const apiKey = 'FMKEqXONsfQxcE5I6MAkUboGHxTQQbUDNi2sucGIARc';
   if (!apiKey) {
     console.error('API key (CHEAP_BUNDLES_API_KEY) is not configured');
     return NextResponse.json({ error: 'Internal server error: Service not configured' }, { status: 500 });
