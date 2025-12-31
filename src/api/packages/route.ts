@@ -4,10 +4,10 @@ import { NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic'; // Prevents caching issues
 
 export async function GET() {
-  const apiKey = process.env.CHEAP_BUNDLES_API_KEY;
+  const apiKey = 'FMKEqXONsfQxcE5I6MAkUboGHxTQQbUDNi2sucGIARc';
 
   if (!apiKey) {
-    console.error('API key (CHEAP_BUNDLES_API_KEY) is not configured in environment variables.');
+    console.error('API key is not configured');
     return NextResponse.json(
       { error: 'Internal server error: API key missing' }, 
       { status: 500 }
