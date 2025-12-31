@@ -27,7 +27,7 @@ export default function WalletPage() {
             .limit(10);
         
         if (transactionsError) {
-            console.error('Error fetching transactions:', transactionsError);
+            console.error('Error fetching transactions:', transactionsError.message || transactionsError);
             toast({ title: 'Error', description: 'Could not fetch transaction history.', variant: 'destructive'});
         } else {
             setTransactions(transactionsData || []);
@@ -115,5 +115,3 @@ export default function WalletPage() {
         </div>
     );
 }
-
-    
