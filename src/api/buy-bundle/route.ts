@@ -34,9 +34,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Insufficient funds. Please top up your wallet.' }, { status: 400 });
   }
 
-  const apiKey = process.env.CHEAP_BUNDLES_API_KEY;
+  const apiKey = "FMKEqXONsfQxcE5I6MAkUboGHxTQQbUDNi2sucGIARc";
   if (!apiKey) {
-    console.error('API key (CHEAP_BUNDLES_API_KEY) is not configured');
+    console.error('API key is not configured');
     return NextResponse.json({ error: 'Internal server error: Service not configured' }, { status: 500 });
   }
 
@@ -86,8 +86,6 @@ export async function POST(req: NextRequest) {
 
     if (rpcError) {
         console.error("CRITICAL: RPC 'purchase_bundle_and_log_transaction' failed after successful external purchase.", rpcError);
-        // This is a critical state. The user got the bundle but we failed to debit them.
-        // We log this internally for reconciliation but inform the user of success.
         return NextResponse.json({ 
             success: true, 
             message: 'Purchase successful. There was a slight delay in updating your balance, please refresh.',
