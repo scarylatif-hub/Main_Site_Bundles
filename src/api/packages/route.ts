@@ -1,15 +1,15 @@
 
 import { NextResponse } from 'next/server';
 
-export const dynamic = 'force-dynamic'; 
+export const dynamic = 'force-dynamic'; // Prevents caching issues
 
 export async function GET() {
-  const apiKey = 'FMKEqXONsfQxcE5I6MAkUboGHxTQQbUDNi2sucGIARc';
+  const apiKey = process.env.CHEAP_BUNDLES_API_KEY;
 
   if (!apiKey) {
-    console.error('API key is not configured.');
+    console.error('API key (CHEAP_BUNDLES_API_KEY) is not configured in environment variables.');
     return NextResponse.json(
-      { error: 'Internal server error: Service not configured' }, 
+      { error: 'Internal server error: API key missing' }, 
       { status: 500 }
     );
   }
@@ -33,33 +33,12 @@ export async function GET() {
         `External API error: ${response.status} ${response.statusText}`,
         errorBody
       );
-      return NextResponse.json(
-        { 
-          error: 'Failed to fetch packages from external source.',
-          statusCode: response.status,
-          details: errorBody
-        },
-        { status: response.status }
-      );
+      // Forward the external API's error response details
+      return new NextResponse(errorBody, { status: response.status, headers: { 'Content-Type': 'application/json' } });
     }
 
     const data = await response.json();
-    
-    // The external API might return the array directly, or nested under a "packages" key.
-    if (data && Array.isArray(data.packages)) {
-      return NextResponse.json(data.packages);
-    }
-    
-    if (Array.isArray(data)) {
-        return NextResponse.json(data);
-    }
-
-    console.error("Unexpected response structure from external API:", data);
-    return NextResponse.json(
-        { error: 'Unexpected response structure from external API.' },
-        { status: 500 }
-    );
-
+    return NextResponse.json(data);
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
