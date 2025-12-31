@@ -1,3 +1,4 @@
+
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { cookies } from 'next/headers';
@@ -17,8 +18,8 @@ export async function POST(req: NextRequest) {
   if (!recipientMsisdn || !networkId || !sharedBundle || price === undefined || !dataAmount) {
     return NextResponse.json({ error: 'Missing required fields for purchase' }, { status: 400 });
   }
-  
-  // First, verify user's balance is sufficient before attempting any external API call
+
+  // First, verify user's balance is sufficient
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
     .select('wallet_balance')
@@ -34,11 +35,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Insufficient funds. Please top up your wallet.' }, { status: 400 });
   }
 
-
   const apiKey = process.env.CHEAP_BUNDLES_API_KEY;
-
   if (!apiKey) {
-    console.error('API key (CHEAP_BUNDLES_API_KEY) is not configured');
+    console.error('API key (CHEAP_BUNDLES_API_KEY) is not configured in environment variables.');
     return NextResponse.json({ error: 'Internal server error: Service not configured' }, { status: 500 });
   }
 
@@ -58,12 +57,12 @@ export async function POST(req: NextRequest) {
     if (!externalApiResponse.ok || !result.success) {
         console.error("External API purchase failed:", result);
         const transactionCode = result.transactionCode || `FAILED-${Date.now()}`;
-        // Log the FAILED transaction, but DO NOT deduct from wallet since the purchase failed.
+        // Log the FAILED transaction, but DO NOT deduct from wallet
         const { error: logError } = await supabase
         .from('transactions')
         .insert({
             user_id: session.user.id,
-            amount: price, // Log the intended amount
+            amount: price,
             transaction_code: transactionCode,
             status: 'failed',
             transaction_type: 'purchase',
@@ -92,12 +91,11 @@ export async function POST(req: NextRequest) {
     if (rpcError) {
         console.error("CRITICAL: RPC 'purchase_bundle_and_log_transaction' failed after successful external purchase.", rpcError);
         // This is a critical state. The user got the bundle but we failed to debit them.
-        // We log this internally for reconciliation but inform the user of success.
-        // A more advanced system would have a reconciliation queue.
-        return NextResponse.json({ 
-            success: true, 
+        // We still inform the user of success and can reconcile later.
+        return NextResponse.json({
+            success: true,
             message: 'Purchase successful. There was a slight delay in updating your balance, please refresh.',
-            ...result 
+            ...result
         });
     }
 
@@ -105,7 +103,6 @@ export async function POST(req: NextRequest) {
 
   } catch (error: any) {
     console.error('Unhandled error in /api/buy-bundle:', error);
-    // Log a generic failure if the fetch itself fails
      await supabase
         .from('transactions')
         .insert({
