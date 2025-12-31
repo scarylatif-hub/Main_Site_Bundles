@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { usePaystackPayment } from 'react-paystack';
 import { PhoneInputForm } from '@/components/phone-input-form';
 import type { NetworkName, Package } from '@/lib/definitions';
@@ -63,15 +63,15 @@ export default function Home() {
     // you can define a function to run when the user closes the payment dialog
   };
 
-  const paystackConfig = {
+    const paystackConfig = {
       reference: `TXN-${Date.now()}`,
       email: user?.email || '',
       amount: Math.round(parseFloat(depositAmount || '0') * 100), // Amount is in pesewas
       publicKey: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY!,
       currency: 'GHS' as const,
   };
-
   const initializePayment = usePaystackPayment(paystackConfig);
+
 
   const handleProceedToPayment = () => {
       const amount = parseFloat(depositAmount);
@@ -87,16 +87,16 @@ export default function Home() {
           toast({ title: 'Configuration Error', description: 'Payment gateway is not configured.', variant: 'destructive'});
           return;
       }
-
-      initializePayment({
+      
+      const config = {
+        ...paystackConfig,
+        amount: Math.round(amount * 100),
+        reference: `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         onSuccess: handleDepositSuccess,
         onClose: handleDepositClose,
-        config: {
-            ...paystackConfig,
-            amount: Math.round(amount * 100),
-            reference: `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        }
-      });
+      };
+
+      initializePayment(config);
   };
 
   useEffect(() => {
