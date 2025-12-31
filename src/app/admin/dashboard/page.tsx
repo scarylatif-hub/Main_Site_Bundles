@@ -21,9 +21,19 @@ async function getTransactions(supabase: any): Promise<Transaction[]> {
 
 async function getUsers(cookieStore: any): Promise<Profile[]> {
     // Create a Supabase client with the service role key to bypass RLS
+    // This requires the environment variables to be set correctly.
+    // Assuming they are available in the server environment where this runs.
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !serviceKey) {
+        console.error("Supabase URL or Service Role Key is not set. Cannot fetch all users.");
+        return [];
+    }
+
     const supabaseAdmin = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        supabaseUrl,
+        serviceKey,
         {
             cookies: {
                 get(name: string) {

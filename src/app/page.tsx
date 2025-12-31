@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from 'react';
+import { usePaystackPayment } from 'react-paystack';
 import { PhoneInputForm } from '@/components/phone-input-form';
 import type { NetworkName, Package } from '@/lib/definitions';
 import { Button } from '@/components/ui/button';
@@ -18,8 +19,6 @@ import { Label } from "@/components/ui/label";
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { supabase } from '@/lib/supabase/client';
-import { usePaystack } from '@/hooks/use-paystack';
-
 
 export default function Home() {
   const { user, userProfile, refreshUser } = useAuth();
@@ -60,12 +59,46 @@ export default function Home() {
     }
   };
 
-  const { initializePayment } = usePaystack({
-    email: user?.email ?? '',
-    onSuccess: handleDepositSuccess,
-    onClose: () => { /* User closed the modal */ }
-  });
-  
+  const handleDepositClose = () => {
+    // you can define a function to run when the user closes the payment dialog
+  };
+
+  const paystackConfig = {
+      reference: `TXN-${Date.now()}`,
+      email: user?.email || '',
+      amount: Math.round(parseFloat(depositAmount || '0') * 100), // Amount is in pesewas
+      publicKey: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY!,
+      currency: 'GHS' as const,
+  };
+
+  const initializePayment = usePaystackPayment(paystackConfig);
+
+  const handleProceedToPayment = () => {
+      const amount = parseFloat(depositAmount);
+      if (!user?.email) {
+          toast({ title: 'Error', description: 'User email is not available.', variant: 'destructive'});
+          return;
+      }
+      if (isNaN(amount) || amount < 1) {
+          toast({ title: 'Invalid Amount', description: 'Please enter an amount of at least GHS 1.', variant: 'destructive'});
+          return;
+      }
+      if (!process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY) {
+          toast({ title: 'Configuration Error', description: 'Payment gateway is not configured.', variant: 'destructive'});
+          return;
+      }
+
+      initializePayment({
+        onSuccess: handleDepositSuccess,
+        onClose: handleDepositClose,
+        config: {
+            ...paystackConfig,
+            amount: Math.round(amount * 100),
+            reference: `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        }
+      });
+  };
+
   useEffect(() => {
     const fetchPackages = async () => {
       try {
@@ -226,7 +259,7 @@ export default function Home() {
               </CardContent>
               <CardFooter>
                  <Button
-                    onClick={() => initializePayment(parseFloat(depositAmount))}
+                    onClick={handleProceedToPayment}
                     disabled={!user?.email || !isValidDepositAmount() || !process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY}
                     className="w-full"
                 >
