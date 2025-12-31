@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
   if (!recipientMsisdn || !networkId || !sharedBundle || price === undefined || !dataAmount) {
     return NextResponse.json({ error: 'Missing required fields for purchase' }, { status: 400 });
   }
-  
+
   // First, verify user's balance is sufficient
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-API-KEY': apiKey,
+        'X-API-KEY': apiKey, // Use the correct header 'X-API-KEY'
       },
       body: JSON.stringify({ recipientMsisdn, networkId, sharedBundle }),
     });
