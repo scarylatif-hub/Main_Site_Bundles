@@ -38,6 +38,7 @@ export async function GET() {
     
     const data = await response.json();
 
+    // Handle both cases: { packages: [...] } and [...]
     if (data && Array.isArray(data.packages)) {
       return NextResponse.json(data.packages);
     }
