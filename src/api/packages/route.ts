@@ -1,12 +1,12 @@
 
 import { NextResponse } from 'next/server';
 
-export const dynamic = 'force-dynamic';
-
-const CHEAP_BUNDLES_API_KEY = 'FMKEqXONsfQxcE5I6MAkUboGHxTQQbUDNi2sucGIARc';
+export const dynamic = 'force-dynamic'; // Prevents caching issues
 
 export async function GET() {
-  if (!CHEAP_BUNDLES_API_KEY) {
+  const apiKey = process.env.CHEAP_BUNDLES_API_KEY;
+
+  if (!apiKey) {
     console.error('API key is not configured');
     return NextResponse.json(
       { error: 'Internal server error: API key missing' }, 
@@ -21,7 +21,7 @@ export async function GET() {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-KEY': CHEAP_BUNDLES_API_KEY,
+          'X-API-KEY': apiKey,
         },
         cache: 'no-store', 
       }
@@ -33,11 +33,13 @@ export async function GET() {
         `External API error: ${response.status} ${response.statusText}`,
         errorBody
       );
+      // Forward the external API's error response
       return new NextResponse(errorBody, { status: response.status });
     }
-    
-    const data = await response.json();
 
+    // Pass the raw JSON response directly to the client
+    const data = await response.json();
+    
     if (data && Array.isArray(data.packages)) {
       return NextResponse.json(data.packages);
     }
@@ -51,6 +53,7 @@ export async function GET() {
         { error: 'Unexpected response structure from external API.' },
         { status: 500 }
     );
+
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';

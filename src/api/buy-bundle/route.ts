@@ -3,8 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { cookies } from 'next/headers';
 
-const CHEAP_BUNDLES_API_KEY = 'FMKEqXONsfQxcE5I6MAkUboGHxTQQbUDNi2sucGIARc';
-
 export async function POST(req: NextRequest) {
   const cookieStore = cookies();
   const supabase = createClient(cookieStore);
@@ -36,7 +34,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Insufficient funds. Please top up your wallet.' }, { status: 400 });
   }
 
-  if (!CHEAP_BUNDLES_API_KEY) {
+  const apiKey = process.env.CHEAP_BUNDLES_API_KEY;
+  if (!apiKey) {
     console.error('API key (CHEAP_BUNDLES_API_KEY) is not configured');
     return NextResponse.json({ error: 'Internal server error: Service not configured' }, { status: 500 });
   }
@@ -46,7 +45,7 @@ export async function POST(req: NextRequest) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-API-KEY': CHEAP_BUNDLES_API_KEY,
+        'X-API-KEY': apiKey,
       },
       body: JSON.stringify({ recipientMsisdn, networkId, sharedBundle }),
     });
