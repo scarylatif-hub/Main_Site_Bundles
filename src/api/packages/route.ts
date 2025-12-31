@@ -38,12 +38,12 @@ export async function GET() {
     
     const data = await response.json();
 
-    // The external API sometimes returns {packages: [...]}, and sometimes just [...]
-    // This handles both cases gracefully.
+    // According to documentation, the response is { "packages": [...] }
     if (data && Array.isArray(data.packages)) {
       return NextResponse.json(data.packages);
     }
     
+    // Fallback for cases where API might return a raw array
     if (Array.isArray(data)) {
         return NextResponse.json(data);
     }
