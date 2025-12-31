@@ -55,14 +55,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .single();
       
       if (error && status !== 406) {
+        // A 406 status from .single() means no row was found, which is expected for new users.
+        // We only want to throw for other, unexpected errors.
         throw error;
       }
       
       if (data) {
         setUserProfile(data);
       }
-    } catch (error) {
-      console.error("Error fetching user profile:", error);
+    } catch (error: any) {
+      console.error("Error fetching user profile:", error.message || error);
     }
   }, []);
 
