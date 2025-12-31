@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
         `External API error: ${response.status} ${response.statusText}`,
         errorBody
       );
+      // Return the actual error from the external API
       return new NextResponse(errorBody, { status: response.status, headers: { 'Content-Type': 'application/json' } });
     }
 
@@ -43,9 +44,9 @@ export async function GET(request: NextRequest) {
     if (data && Array.isArray(data.packages)) {
       return NextResponse.json(data.packages);
     }
-
-    if (Array.isArray(data)) {
-      return NextResponse.json(data);
+    
+    if(Array.isArray(data)) {
+        return NextResponse.json(data);
     }
 
     console.error('Unexpected response structure from external API:', data);

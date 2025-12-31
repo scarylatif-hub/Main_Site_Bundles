@@ -1,4 +1,5 @@
 
+
 "use client";
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
@@ -67,7 +68,7 @@ export default function Home() {
       reference: `TXN-${Date.now()}`,
       email: user?.email || '',
       amount: Math.round(parseFloat(depositAmount || '0') * 100), // Amount is in pesewas
-      publicKey: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY!,
+      publicKey: "pk_test_b8b375b4e3978b40d4334336186411b51e089d70",
       currency: 'GHS' as const,
   };
   const initializePayment = usePaystackPayment(paystackConfig);
@@ -83,7 +84,7 @@ export default function Home() {
           toast({ title: 'Invalid Amount', description: 'Please enter an amount of at least GHS 1.', variant: 'destructive'});
           return;
       }
-      if (!process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY) {
+      if (!"pk_test_b8b375b4e3978b40d4334336186411b51e089d70") {
           toast({ title: 'Configuration Error', description: 'Payment gateway is not configured.', variant: 'destructive'});
           return;
       }
@@ -218,7 +219,7 @@ export default function Home() {
                   <CardDescription>Enter an amount to deposit via our secure payment gateway.</CardDescription>
               </CardHeader>
               <CardContent className="grid gap-6">
-                  {!process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY ? (
+                  {!"pk_test_b8b375b4e3978b40d4334336186411b51e089d70" ? (
                       <Alert variant="destructive">
                           <Info className="h-4 w-4" />
                           <AlertTitle>Configuration Error</AlertTitle>
@@ -258,7 +259,7 @@ export default function Home() {
               <CardFooter>
                  <Button
                     onClick={handleProceedToPayment}
-                    disabled={!user?.email || !isValidDepositAmount() || !process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY}
+                    disabled={!user?.email || !isValidDepositAmount() || !"pk_test_b8b375b4e3978b40d4334336186411b51e089d70"}
                     className="w-full"
                 >
                     Proceed to Payment
@@ -457,3 +458,5 @@ export default function Home() {
     </div>
   );
 }
+
+    
