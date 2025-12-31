@@ -5,23 +5,24 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   const apiKey = process.env.CHEAP_BUNDLES_API_KEY;
+  const apiUrl = process.env.CHEAP_BUNDLES_API_URL;
 
-  if (!apiKey) {
-    console.error('CHEAP_BUNDLES_API_KEY is not configured in environment variables');
+  if (!apiKey || !apiUrl) {
+    console.error('Cheap Bundles API URL or Key is not configured in environment variables');
     return NextResponse.json(
-      { error: 'Internal server error: API key missing' },
+      { error: 'Internal server error: API service not configured' },
       { status: 500 }
     );
   }
 
   try {
     const response = await fetch(
-      'https://cheap-bundles-ghana.azurewebsites.net/api/external/packages/all-packages',
+      `${apiUrl}/api/external/packages/all-packages`,
       {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-KEY': apiKey, // Use the correct header 'X-API-KEY'
+          'X-API-KEY': apiKey,
         },
         cache: 'no-store',
       }

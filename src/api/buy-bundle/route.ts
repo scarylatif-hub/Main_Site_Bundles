@@ -36,18 +36,20 @@ export async function POST(req: NextRequest) {
   }
 
   const apiKey = process.env.CHEAP_BUNDLES_API_KEY;
-  if (!apiKey) {
-    console.error('API key (CHEAP_BUNDLES_API_KEY) is not configured in environment variables.');
+  const apiUrl = process.env.CHEAP_BUNDLES_API_URL;
+
+  if (!apiKey || !apiUrl) {
+    console.error('Cheap Bundles API URL or Key is not configured in environment variables.');
     return NextResponse.json({ error: 'Internal server error: Service not configured' }, { status: 500 });
   }
 
   // Attempt to purchase the bundle from the external API
   try {
-    const externalApiResponse = await fetch('https://cheap-bundles-ghana.azurewebsites.net/api/external/packages/buy-other', {
+    const externalApiResponse = await fetch(`${apiUrl}/api/external/packages/buy-other`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-API-KEY': apiKey, // Use the correct header 'X-API-KEY'
+        'X-API-KEY': apiKey,
       },
       body: JSON.stringify({ recipientMsisdn, networkId, sharedBundle }),
     });
