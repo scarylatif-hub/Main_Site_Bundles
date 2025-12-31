@@ -3,10 +3,10 @@ import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  const apiKey = 'FMKEqXONsfQxcE5I6MAkUboGHxTQQbUDNi2sucGIARc';
+const CHEAP_BUNDLES_API_KEY = 'FMKEqXONsfQxcE5I6MAkUboGHxTQQbUDNi2sucGIARc';
 
-  if (!apiKey) {
+export async function GET() {
+  if (!CHEAP_BUNDLES_API_KEY) {
     console.error('API key is not configured');
     return NextResponse.json(
       { error: 'Internal server error: API key missing' }, 
@@ -21,7 +21,7 @@ export async function GET() {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-KEY': apiKey,
+          'X-API-KEY': CHEAP_BUNDLES_API_KEY,
         },
         cache: 'no-store', 
       }
@@ -38,7 +38,6 @@ export async function GET() {
     
     const data = await response.json();
 
-    // Handle both cases: { packages: [...] } and [...]
     if (data && Array.isArray(data.packages)) {
       return NextResponse.json(data.packages);
     }
