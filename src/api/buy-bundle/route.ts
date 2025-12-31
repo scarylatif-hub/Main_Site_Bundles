@@ -90,6 +90,8 @@ export async function POST(req: NextRequest) {
 
     if (rpcError) {
         console.error("CRITICAL: RPC 'purchase_bundle_and_log_transaction' failed after successful external purchase.", rpcError);
+        // This is a critical state. The user got the bundle but we failed to debit them.
+        // We still inform the user of success and can reconcile later.
         return NextResponse.json({ 
             success: true, 
             message: 'Purchase successful. There was a slight delay in updating your balance, please refresh.',

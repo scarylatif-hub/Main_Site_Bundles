@@ -110,9 +110,7 @@ export default function Home() {
           throw new Error('Failed to fetch packages');
         }
         const data = await response.json();
-         if (data && Array.isArray(data.packages)) {
-            setAllPackages(data.packages);
-        } else if (Array.isArray(data)) {
+         if (Array.isArray(data)) {
             setAllPackages(data);
         } else {
            console.error("Unexpected data structure from API:", data);

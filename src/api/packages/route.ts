@@ -9,7 +9,7 @@ export async function GET() {
   if (!apiKey) {
     console.error('API key (CHEAP_BUNDLES_API_KEY) is not configured in environment variables.');
     return NextResponse.json(
-      { error: 'Internal server error: API key missing' }, 
+      { error: 'Internal server error: Service not configured' }, 
       { status: 500 }
     );
   }
@@ -38,7 +38,24 @@ export async function GET() {
     }
 
     const data = await response.json();
-    return NextResponse.json(data);
+    
+    // The external API can return data in two shapes: { packages: [...] } or just [...]
+    if (data && Array.isArray(data.packages)) {
+      return NextResponse.json(data.packages);
+    }
+    
+    if(Array.isArray(data)) {
+        return NextResponse.json(data);
+    }
+
+    console.error('Unexpected response structure from external API:', data);
+    return NextResponse.json(
+      { 
+        error: 'Unexpected response structure from external provider.',
+        details: data
+      },
+      { status: 500 }
+    );
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
