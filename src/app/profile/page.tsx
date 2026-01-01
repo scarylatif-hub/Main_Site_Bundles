@@ -1,3 +1,4 @@
+
 "use client";
 
 import { PageHeader } from "@/components/page-header";
@@ -13,9 +14,10 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/auth-context";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import Link from "next/link";
 
 export default function ProfilePage() {
-  const { user, loading, logout } = useAuth();
+  const { user, userProfile, loading, logout } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -32,13 +34,14 @@ export default function ProfilePage() {
     );
   }
 
-  const displayName = user.user_metadata.full_name || "User";
+  const displayName = userProfile?.full_name || user.user_metadata.full_name || "User";
 
   const userInitials =
     displayName
       ?.split(" ")
       .map((n) => n[0])
-      .join("") ||
+      .join("")
+      .toUpperCase() ||
     user.email?.[0].toUpperCase() ||
     "U";
 
@@ -66,32 +69,22 @@ export default function ProfilePage() {
           <CardContent className="space-y-6">
             <div>
               <h3 className="font-semibold">Account Information</h3>
-              <p className="text-sm text-muted-foreground">
-                Update your personal details here.
-              </p>
-              <Button className="mt-2">Edit Profile</Button>
-            </div>
-            <hr />
-            <div>
-              <h3 className="font-semibold">Security</h3>
-              <p className="text-sm text-muted-foreground">
-                Change your password.
-              </p>
-              <Button variant="secondary" className="mt-2">
-                Change Password
-              </Button>
+              <ul className="text-sm text-muted-foreground mt-2 space-y-1">
+                <li><span className="font-medium text-foreground">Full Name:</span> {userProfile?.full_name}</li>
+                <li><span className="font-medium text-foreground">Email:</span> {user.email}</li>
+                <li><span className="font-medium text-foreground">Phone:</span> {userProfile?.phone_number}</li>
+              </ul>
             </div>
             <hr />
             <div>
               <h3 className="font-semibold text-destructive">Danger Zone</h3>
               <p className="text-sm text-muted-foreground">
-                Log out or delete your account and all associated data.
+                Log out of your account.
               </p>
               <div className="flex gap-2 mt-2">
                 <Button variant="outline" onClick={logout}>
                     Logout
                 </Button>
-                <Button variant="destructive">Delete Account</Button>
               </div>
             </div>
           </CardContent>

@@ -1,3 +1,4 @@
+
 "use client";
 import { PageHeader } from "@/components/page-header";
 import { OrdersTable } from "@/components/orders-table";
@@ -7,6 +8,8 @@ import { supabase } from "@/lib/supabase/client";
 import { useEffect, useState, useCallback } from "react";
 import type { Transaction } from "@/lib/definitions";
 import { Skeleton } from "@/components/ui/skeleton";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 export default function OrdersPage() {
     const { user, loading: authLoading } = useAuth();
@@ -24,6 +27,7 @@ export default function OrdersPage() {
                 .from('transactions')
                 .select('*')
                 .eq('user_id', user.id)
+                .eq('transaction_type', 'purchase')
                 .order('created_at', { ascending: false });
 
             if (error) {
@@ -41,6 +45,28 @@ export default function OrdersPage() {
             fetchTransactions();
         }
     }, [authLoading, fetchTransactions]);
+    
+    if (authLoading) {
+      return (
+        <div className="flex justify-center items-center h-screen">
+          <div>Loading...</div>
+        </div>
+      )
+    }
+    
+    if (!user) {
+      return (
+         <div className="container mx-auto max-w-3xl px-4 py-8 sm:py-12 text-center">
+            <PageHeader
+                title="My Orders"
+                description="Please log in to view your orders."
+            />
+             <Button asChild className="mt-4">
+                    <Link href="/login">Login</Link>
+            </Button>
+        </div>
+      )
+    }
 
     return (
         <div className="container mx-auto max-w-6xl px-4 py-8 sm:py-12">

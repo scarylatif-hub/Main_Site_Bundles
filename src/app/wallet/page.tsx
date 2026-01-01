@@ -10,14 +10,21 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/auth-context';
 import { supabase } from '@/lib/supabase/client';
 import type { Transaction } from '@/lib/definitions';
+import { Button } from '@/components/ui/button';
+import Link from 'next/link';
 
 export default function WalletPage() {
     const { user, loading, userProfile } = useAuth();
     const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [isFetching, setIsFetching] = useState(true);
     const { toast } = useToast();
 
     const fetchTransactions = useCallback(async () => {
-        if (!user) return;
+        if (!user) {
+            setIsFetching(false);
+            return;
+        };
+        setIsFetching(true);
         
         const { data: transactionsData, error: transactionsError } = await supabase
             .from('transactions')
@@ -32,13 +39,14 @@ export default function WalletPage() {
         } else {
             setTransactions(transactionsData || []);
         }
+        setIsFetching(false);
     }, [user, toast]);
     
     useEffect(() => {
-        if (user) {
+        if (!loading) {
             fetchTransactions();
         }
-    }, [user, fetchTransactions]);
+    }, [loading, fetchTransactions]);
 
     if (loading) {
         return (
@@ -50,8 +58,14 @@ export default function WalletPage() {
 
     if (!user) {
          return (
-            <div className="flex justify-center items-center h-screen">
-                <div>Please log in to view your wallet.</div>
+            <div className="container mx-auto max-w-3xl px-4 py-8 sm:py-12 text-center">
+                <PageHeader
+                    title="My Wallet"
+                    description="Please log in to view your wallet."
+                />
+                 <Button asChild className="mt-4">
+                        <Link href="/login">Login</Link>
+                </Button>
             </div>
         );
     }
@@ -76,6 +90,9 @@ export default function WalletPage() {
                             <p className="text-4xl font-bold">GHS {userProfile?.wallet_balance?.toFixed(2) || '0.00'}</p>
                         </CardContent>
                     </Card>
+                     <Button asChild className="w-full">
+                        <Link href="/#deposit">Add Funds</Link>
+                    </Button>
                 </div>
                 <div className="md:col-span-2">
                     <Card>
@@ -85,10 +102,14 @@ export default function WalletPage() {
                         </CardHeader>
                         <CardContent>
                             <div className="divide-y divide-border">
-                                {transactions.length > 0 ? transactions.map((tx) => (
+                                {isFetching ? (
+                                    <p className="text-center text-muted-foreground py-8">Fetching transactions...</p>
+                                ) : transactions.length > 0 ? transactions.map((tx) => {
+                                    const isCredit = tx.transaction_type.toLowerCase() === 'deposit';
+                                    return (
                                     <div key={tx.id} className="flex items-center py-4">
                                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
-                                            {tx.amount > 0 ? 
+                                            {isCredit ? 
                                                 <ArrowDownCircle className="h-5 w-5 text-success" /> : 
                                                 <ArrowUpCircle className="h-5 w-5 text-destructive" />
                                             }
@@ -99,12 +120,12 @@ export default function WalletPage() {
                                         </div>
                                         <p className={cn(
                                             "font-semibold",
-                                            tx.amount > 0 ? 'text-success' : 'text-destructive'
+                                            isCredit ? 'text-success' : 'text-destructive'
                                         )}>
-                                            {tx.amount > 0 ? `+${Number(tx.amount).toFixed(2)}` : `${Number(tx.amount).toFixed(2)}`}
+                                            {isCredit ? `+${Number(tx.amount).toFixed(2)}` : `${Number(tx.amount).toFixed(2)}`}
                                         </p>
                                     </div>
-                                )) : (
+                                )}) : (
                                     <p className="text-center text-muted-foreground py-8">No transactions yet.</p>
                                 )}
                             </div>
