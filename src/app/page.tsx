@@ -217,6 +217,7 @@ export default function Home() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.1 }}
           className="mb-8"
+          id="deposit"
         >
           <Card>
               <CardHeader>
@@ -463,3 +464,5 @@ export default function Home() {
     </div>
   );
 }
+
+    
