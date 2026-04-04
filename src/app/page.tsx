@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { supabase } from '@/lib/supabase/client';
+import { validatePhoneNumber } from '@/lib/networks';
 
 export default function Home() {
   const { user, userProfile, refreshUser } = useAuth();
@@ -133,7 +134,7 @@ export default function Home() {
       toast({ title: "Please Login", description: "You need to be logged in to purchase a package.", variant: "destructive" });
       return;
     }
-    if (!phoneNumber || !/^0(20|50|24|54|55|59|27|57|26|56)\d{7}$/.test(phoneNumber)) {
+    if (!phoneNumber || !validatePhoneNumber(phoneNumber)) {
       toast({ title: "Invalid Phone Number", description: "Please enter a valid phone number before buying.", variant: "destructive" });
       return;
     }

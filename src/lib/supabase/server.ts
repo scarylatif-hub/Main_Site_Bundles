@@ -15,14 +15,14 @@ export const createClient = (cookieStore: ReturnType<typeof cookies>) => {
           try {
             cookieStore.set({ name, value, ...options })
           } catch (error) {
-            // Server Component cookie set error
+            // This can be ignored if you have middleware refreshing user sessions.
           }
         },
         remove(name: string, options: CookieOptions) {
           try {
             cookieStore.set({ name, value: '', ...options })
           } catch (error) {
-            // Server Component cookie remove error
+            // This can be ignored if you have middleware refreshing user sessions.
           }
         },
       },
