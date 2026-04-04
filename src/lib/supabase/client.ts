@@ -1,7 +1,17 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-export const supabase = createClient(
-  "https://ieqrdlbdqilzwibtyyqy.supabase.co",
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImllcXJkbGJkcWlsendpYnR5eXF5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3MzIwMTUsImV4cCI6MjA4MjMwODAxNX0.vKWlA8t4-vllguDrd7AN7ipYDFGile025bnZ4HSSer8"
-);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error("Missing Supabase environment variables");
+}
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+});

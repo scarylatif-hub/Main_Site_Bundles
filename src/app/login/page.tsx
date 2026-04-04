@@ -27,7 +27,6 @@ import Link from "next/link";
 import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase/client";
 
 const FormSchema = z.object({
   email: z.string().email({ message: "Please enter a valid email address." }),
@@ -53,14 +52,26 @@ export default function LoginPage() {
   async function onSubmit(data: z.infer<typeof FormSchema>) {
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: data.email,
-        password: data.password,
+      console.log('Starting signin for email:', data.email);
+      
+      // Use server-side signin endpoint
+      const signinResponse = await fetch('/api/auth/signin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: data.email,
+          password: data.password,
+        }),
       });
 
-      if (error) {
-        throw error;
+      const signinResult = await signinResponse.json();
+
+      if (!signinResponse.ok) {
+        console.error('Signin API error:', signinResult);
+        throw new Error(signinResult.details || signinResult.error || 'Sign in failed');
       }
+
+      console.log('Signin successful:', signinResult);
 
       toast({
         title: "Login Successful",

@@ -4,8 +4,8 @@
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
 import { usePaystack } from '@/hooks/use-paystack';
-import { formatPrice } from '@/lib/normalize-types';
-import type { CartItem } from '@/lib/types';
+import { formatPrice } from '@/lib/format';
+import type { CartItem } from '@/lib/definitions';
 import {
   MIN_WALLET_DEPOSIT_BASE_GHS,
   cartPaystackChargeFromBaseGhs,
@@ -87,7 +87,10 @@ export default function PaystackButton({
 
   const handleClick = () => {
     if (!hasValidEmail || !hasValidAmount) return;
-    initializePayment(email, baseAmount);
+    initializePayment({
+      email,
+      amount: baseAmount,
+    });
   };
 
   const buttonText =

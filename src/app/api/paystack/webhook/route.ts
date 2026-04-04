@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     if (event === 'charge.success') {
       const { reference, amount, metadata, customer, status } = eventData;
 
-      const cookieStore = await cookies();
+      const cookieStore = cookies();
       const supabase = createClient(cookieStore);
 
       // Extract user ID from metadata or reference

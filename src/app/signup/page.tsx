@@ -28,7 +28,6 @@ import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase/client";
 
 
 const passwordValidation = new RegExp(
@@ -75,45 +74,28 @@ export default function SignupPage() {
   async function onSubmit(data: z.infer<typeof FormSchema>) {
     setLoading(true);
     try {
-        // Step 1: Sign up user with Supabase Auth
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-            email: data.email,
-            password: data.password,
-            options: {
-                data: {
-                    full_name: data.fullName,
-                    phone_number: data.phone,
-                }
-            }
+        console.log('Starting signup process for email:', data.email);
+        
+        // Use server-side signup to avoid client-side Supabase auth issues
+        const signupResponse = await fetch('/api/auth/signup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                email: data.email,
+                password: data.password,
+                fullName: data.fullName,
+                phone: data.phone,
+            }),
         });
 
-        if (signUpError) {
-            throw signUpError;
+        const signupResult = await signupResponse.json();
+
+        if (!signupResponse.ok) {
+            console.error('Signup API error:', signupResult);
+            throw new Error(signupResult.details || signupResult.error || 'Sign up failed');
         }
 
-        if (!signUpData.user) {
-            throw new Error("Signup failed: No user returned");
-        }
-
-        // Step 2: Create profile in database via API
-        try {
-            const profileResponse = await fetch('/api/auth/profile', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    fullName: data.fullName,
-                    email: data.email,
-                    phoneNumber: data.phone,
-                }),
-            });
-
-            if (!profileResponse.ok) {
-                console.warn('Profile creation via API failed, profile may be created via trigger');
-            }
-        } catch (profileError) {
-            console.warn('Error creating profile via API:', profileError);
-            // Continue anyway - profile may be created by database trigger
-        }
+        console.log('Signup successful:', signupResult);
 
         toast({
             title: "Account Created",
