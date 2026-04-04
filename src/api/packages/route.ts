@@ -18,6 +18,7 @@ export async function GET(request: NextRequest) {
         'Content-Type': 'application/json',
         'X-API-KEY': apiKey,
       },
+      cache: 'no-store',
     });
 
     if (!response.ok) return new NextResponse(await response.text(), { status: response.status });
