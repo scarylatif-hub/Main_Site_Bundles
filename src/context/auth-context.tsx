@@ -16,8 +16,8 @@ import { useRouter } from "next/navigation";
 export type Profile = {
   id: string;
   full_name: string;
+  email: string;
   phone_number: string;
-  api_key: string;
   wallet_balance: number;
   updated_at: string;
   is_admin: boolean;

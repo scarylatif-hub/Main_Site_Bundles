@@ -5,34 +5,36 @@
 
 -- Create profiles table to store public user data
 -- This table is linked to the auth.users table
-create table public.profiles (
-  id uuid not null references auth.users on delete cascade,
+DROP TABLE IF EXISTS public.profiles CASCADE;
+
+CREATE TABLE public.profiles (
+  id uuid NOT NULL REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
   full_name text,
+  email text,
   phone_number text,
-  api_key text not null unique,
-  wallet_balance numeric(10, 2) not null default 0.00,
-  updated_at timestamp with time zone,
+  wallet_balance numeric(10, 2) NOT NULL DEFAULT 0.00,
+  is_admin boolean DEFAULT false,
+  updated_at timestamp with time zone DEFAULT timezone('utc'::text, now()),
   
-  primary key (id),
-  constraint full_name_length check (char_length(full_name) >= 3)
+  CONSTRAINT full_name_length CHECK (char_length(full_name) >= 3)
 );
 
 -- Create transactions table to log all user financial activities
-create table public.transactions (
-    id uuid primary key default gen_random_uuid(),
-    user_id uuid not null references public.profiles on delete cascade,
-    transaction_code text,
-    transaction_type text not null, -- e.g., 'deposit', 'purchase', 'refund'
+DROP TABLE IF EXISTS public.transactions CASCADE;
+
+CREATE TABLE public.transactions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES public.profiles ON DELETE CASCADE,
+    transaction_code text UNIQUE,
+    transaction_type text NOT NULL,
     recipient_msisdn text,
     network_id integer,
     shared_bundle integer,
     bundle_amount text,
-    amount numeric(10, 2) not null,
-    status text not null, -- e.g., 'success', 'failed', 'pending'
+    amount numeric(10, 2) NOT NULL,
+    status text DEFAULT 'pending',
     description text,
-    balance_before numeric(10, 2),
-    balance_after numeric(10, 2),
-    created_at timestamp with time zone default timezone('utc'::text, now()) not null
+    created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 
@@ -41,65 +43,67 @@ create table public.transactions (
 -- ===============================================================================================
 
 -- Enable RLS for all tables
-alter table public.profiles enable row level security;
-alter table public.transactions enable row level security;
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing policies to avoid conflicts
+DROP POLICY IF EXISTS "Users can view their own profile." ON public.profiles;
+DROP POLICY IF EXISTS "Users can update their own profile." ON public.profiles;
+DROP POLICY IF EXISTS "Users can view their own transactions." ON public.transactions;
+DROP POLICY IF EXISTS "Users can insert their own transactions." ON public.transactions;
 
 -- Policies for profiles table
 -- Allow users to view their own profile
-create policy "Users can view their own profile."
-  on public.profiles for select
-  using ( auth.uid() = id );
+CREATE POLICY "Users can view their own profile."
+  ON public.profiles FOR SELECT
+  USING (auth.uid() = id);
 
 -- Allow users to update their own profile
-create policy "Users can update their own profile."
-  on public.profiles for update
-  using ( auth.uid() = id );
+CREATE POLICY "Users can update their own profile."
+  ON public.profiles FOR UPDATE
+  USING (auth.uid() = id);
 
 -- Policies for transactions table
 -- Allow users to view their own transactions
-create policy "Users can view their own transactions."
-  on public.transactions for select
-  using ( auth.uid() = user_id );
+CREATE POLICY "Users can view their own transactions."
+  ON public.transactions FOR SELECT
+  USING (auth.uid() = user_id);
 
--- Allow users to insert their own transactions (will be handled by functions)
-create policy "Users can insert their own transactions."
-  on public.transactions for insert
-  with check (auth.uid() = user_id);
+-- Allow users to insert their own transactions
+CREATE POLICY "Users can insert their own transactions."
+  ON public.transactions FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
 
 
 -- ===============================================================================================
 -- 3. DATABASE FUNCTIONS
 -- ===============================================================================================
 
+-- Drop existing functions to avoid conflicts
+DROP FUNCTION IF EXISTS public.handle_new_user() CASCADE;
+DROP FUNCTION IF EXISTS public.add_to_wallet_and_log_transaction(uuid, numeric, text, text, text, text) CASCADE;
+DROP FUNCTION IF EXISTS public.purchase_bundle_and_log_transaction(uuid, numeric, text, text, text, integer, integer, text, text) CASCADE;
+
 -- Function to handle new user setup
 -- This function is triggered when a new user signs up in the auth.users table
-create function public.handle_new_user()
-returns trigger
-language plpgsql
-security definer set search_path = public
-as $$
-begin
-  -- Create a new profile
-  insert into public.profiles (id, full_name, phone_number, api_key)
-  values (
-    new.id, 
-    new.raw_user_meta_data->>'full_name',
+CREATE FUNCTION public.handle_new_user()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.profiles (id, full_name, email, phone_number, wallet_balance, is_admin)
+  VALUES (
+    new.id,
+    COALESCE(new.raw_user_meta_data->>'full_name', 'User'),
+    new.email,
     new.raw_user_meta_data->>'phone_number',
-    -- Generate a unique API key
-    replace(gen_random_uuid()::text, '-', '') || replace(gen_random_uuid()::text, '-', '')
+    0.00,
+    false
   );
 
-  -- Create initial wallet deposit record if you want to give a welcome bonus
-  -- Example: Give every new user a 1.00 GHS bonus
-  -- insert into public.transactions (user_id, transaction_type, amount, status, description, balance_before, balance_after)
-  -- values (new.id, 'deposit', 1.00, 'success', 'Welcome Bonus', 0.00, 1.00);
-  
-  -- update public.profiles
-  -- set wallet_balance = 1.00
-  -- where id = new.id;
-
-  return new;
-end;
+  RETURN new;
+END;
 $$;
 
 
@@ -107,16 +111,20 @@ $$;
 -- 4. DATABASE TRIGGERS
 -- ===============================================================================================
 
--- Trigger to execute handle_new_user function on new user creation
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute procedure public.handle_new_user();
+-- Drop existing triggers
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP TRIGGER IF EXISTS handle_updated_at ON public.profiles;
 
--- Trigger to automatically update the 'updated_at' timestamp on profile change
-create trigger handle_updated_at
-  before update on public.profiles
-  for each row
-  execute procedure moddatetime (updated_at);
+-- Trigger to execute handle_new_user function on new user creation
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- Manually update timestamp on profile changes (moddatetime not always available)
+CREATE TRIGGER handle_updated_at
+  BEFORE UPDATE ON public.profiles
+  FOR EACH ROW
+  EXECUTE PROCEDURE moddatetime(updated_at);
 
 
 -- ===============================================================================================
@@ -124,8 +132,7 @@ create trigger handle_updated_at
 -- ===============================================================================================
 
 -- Function to securely add funds to a user's wallet and log the transaction
--- This is an RPC (Remote Procedure Call) function
-create function public.add_to_wallet_and_log_transaction(
+CREATE OR REPLACE FUNCTION public.add_to_wallet_and_log_transaction(
     p_user_id uuid,
     p_amount numeric,
     p_transaction_type text,
@@ -133,51 +140,38 @@ create function public.add_to_wallet_and_log_transaction(
     p_transaction_code text,
     p_description text
 )
-returns void
-language plpgsql
-security definer set search_path = public
-as $$
-declare
-  v_balance_before numeric;
-  v_balance_after numeric;
-begin
-  -- 1. Get the current balance
-  select wallet_balance into v_balance_before from public.profiles where id = p_user_id;
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  -- Update the user's wallet balance
+  UPDATE public.profiles
+  SET wallet_balance = wallet_balance + p_amount,
+      updated_at = timezone('utc'::text, now())
+  WHERE id = p_user_id;
 
-  -- 2. Calculate the new balance
-  v_balance_after := v_balance_before + p_amount;
-
-  -- 3. Update the user's wallet balance
-  update public.profiles
-  set wallet_balance = v_balance_after
-  where id = p_user_id;
-
-  -- 4. Log the transaction
-  insert into public.transactions (
+  -- Log the transaction
+  INSERT INTO public.transactions (
     user_id,
-    transaction_code,
-    transaction_type,
     amount,
+    transaction_type,
     status,
-    description,
-    balance_before,
-    balance_after
-  ) values (
+    transaction_code,
+    description
+  ) VALUES (
     p_user_id,
-    p_transaction_code,
-    p_transaction_type,
     p_amount,
+    p_transaction_type,
     p_status,
-    p_description,
-    v_balance_before,
-    v_balance_after
+    p_transaction_code,
+    p_description
   );
-end;
+END;
 $$;
 
-
 -- Function to securely process a data bundle purchase
-create function public.purchase_bundle_and_log_transaction(
+CREATE OR REPLACE FUNCTION public.purchase_bundle_and_log_transaction(
     p_user_id uuid,
     p_amount numeric,
     p_transaction_code text,
@@ -188,82 +182,77 @@ create function public.purchase_bundle_and_log_transaction(
     p_bundle_amount text,
     p_description text
 )
-returns numeric
-language plpgsql
-security definer set search_path = public
-as $$
-declare
+RETURNS numeric
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public
+AS $$
+DECLARE
   v_balance_before numeric;
   v_balance_after numeric;
-begin
-  -- 1. Get current balance and lock the row for update
-  select wallet_balance into v_balance_before from public.profiles where id = p_user_id for update;
+BEGIN
+  -- Get current balance and lock the row for update
+  SELECT wallet_balance INTO v_balance_before FROM public.profiles WHERE id = p_user_id FOR UPDATE;
 
-  -- 2. Check if the user has sufficient funds
-  if v_balance_before < p_amount then
-    raise exception 'Insufficient funds';
-  end if;
+  -- Check if the user has sufficient funds
+  IF v_balance_before < p_amount THEN
+    RAISE EXCEPTION 'Insufficient funds';
+  END IF;
 
-  -- 3. Calculate new balance
+  -- Calculate new balance
   v_balance_after := v_balance_before - p_amount;
 
-  -- 4. Update user's wallet balance
-  update public.profiles
-  set wallet_balance = v_balance_after
-  where id = p_user_id;
+  -- Update user's wallet balance
+  UPDATE public.profiles
+  SET wallet_balance = v_balance_after,
+      updated_at = timezone('utc'::text, now())
+  WHERE id = p_user_id;
 
-  -- 5. Log the transaction
-  insert into public.transactions (
+  -- Log the transaction
+  INSERT INTO public.transactions (
     user_id,
-    transaction_code,
-    transaction_type,
     amount,
+    transaction_type,
     status,
+    transaction_code,
     recipient_msisdn,
     network_id,
     shared_bundle,
     bundle_amount,
-    description,
-    balance_before,
-    balance_after
-  ) values (
+    description
+  ) VALUES (
     p_user_id,
-    p_transaction_code,
+    -p_amount,
     'purchase',
-    -p_amount, -- Log purchase as a negative amount
     p_status,
+    p_transaction_code,
     p_recipient_msisdn,
     p_network_id,
     p_shared_bundle,
     p_bundle_amount,
-    p_description,
-    v_balance_before,
-    v_balance_after
+    p_description
   );
 
-  -- 6. Return the new balance
-  return v_balance_after;
-end;
+  RETURN v_balance_after;
+END;
 $$;
 
 
 -- ===============================================================================================
--- 6. INITIAL DATA (Optional)
+-- 6. HELPER FUNCTION (if moddatetime doesn't exist)
 -- ===============================================================================================
--- You can add any initial data seeding here if necessary.
 
--- Note: The `moddatetime` function is a common utility for triggers.
--- If it doesn't exist in your Supabase project, you can create it with:
---
--- CREATE OR REPLACE FUNCTION moddatetime()
--- RETURNS TRIGGER AS $$
--- BEGIN
---     NEW.updated_at = NOW();
---     RETURN NEW;
--- END;
--- $$ LANGUAGE plpgsql;
---
--- However, Supabase often includes this by default.
+-- Create moddatetime function if it doesn't already exist
+CREATE OR REPLACE FUNCTION moddatetime()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 -- ===============================================================================================
--- END OF SCRIPT
+-- END OF SCRIPT - DATABASE READY
 -- ===============================================================================================
+Error: Failed to run sql query: ERROR: 42723: function "handle_new_user" already exists with same argument types
+
+

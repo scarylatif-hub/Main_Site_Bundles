@@ -32,7 +32,7 @@ import { supabase } from "@/lib/supabase/client";
 
 
 const passwordValidation = new RegExp(
-    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+\-=\[\]{};:'",.<>?/\\|~`])[A-Za-z\d!@#$%^&*()_+\-=\[\]{};:'",.<>?/\\|~`]{8,}$/
 );
 
 const FormSchema = z
@@ -75,7 +75,8 @@ export default function SignupPage() {
   async function onSubmit(data: z.infer<typeof FormSchema>) {
     setLoading(true);
     try {
-        const { data: signUpData, error } = await supabase.auth.signUp({
+        // Step 1: Sign up user with Supabase Auth
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
             email: data.email,
             password: data.password,
             options: {
@@ -86,17 +87,41 @@ export default function SignupPage() {
             }
         });
 
-        if (error) {
-            throw error;
+        if (signUpError) {
+            throw signUpError;
         }
 
-        // The onAuthStateChange listener in AuthProvider will handle the session.
+        if (!signUpData.user) {
+            throw new Error("Signup failed: No user returned");
+        }
 
-      toast({
-        title: "Account Created",
-        description: "Your account has been successfully created. Welcome!",
-      });
-      router.push("/");
+        // Step 2: Create profile in database via API
+        try {
+            const profileResponse = await fetch('/api/auth/profile', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    fullName: data.fullName,
+                    email: data.email,
+                    phoneNumber: data.phone,
+                }),
+            });
+
+            if (!profileResponse.ok) {
+                console.warn('Profile creation via API failed, profile may be created via trigger');
+            }
+        } catch (profileError) {
+            console.warn('Error creating profile via API:', profileError);
+            // Continue anyway - profile may be created by database trigger
+        }
+
+        toast({
+            title: "Account Created",
+            description: "Your account has been successfully created. Welcome!",
+        });
+
+        // Navigate to home page
+        router.push("/");
     } catch (error: any) {
         console.error("Signup Error:", error);
         toast({
