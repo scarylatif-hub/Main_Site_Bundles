@@ -17,15 +17,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Insufficient funds' }, { status: 400 });
   }
 
-  const apiKey = process.env.CHEAP_BUNDLES_API_KEY;
-  const apiUrl = process.env.CHEAP_BUNDLES_API_URL;
+  const apiKey = "6C0gNLA90BmVVMaZOgOglMFF0mvR4uczlnSPj5beLY";
+  const apiUrl = "https://cheap-bundles-ghana.azurewebsites.net";
 
   try {
     const externalResponse = await fetch(`${apiUrl}/api/external/packages/buy-other`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-API-KEY': apiKey!,
+        'X-API-KEY': apiKey,
       },
       body: JSON.stringify({ recipientMsisdn, networkId, sharedBundle }),
     });
@@ -33,23 +33,14 @@ export async function POST(req: NextRequest) {
     const result = await externalResponse.json();
 
     if (!externalResponse.ok || !result.success) {
-      await supabase.from('transactions').insert({
-        user_id: session.user.id,
-        amount: -price,
-        status: 'failed',
-        transaction_type: 'purchase',
-        recipient_msisdn: recipientMsisdn,
-        network_id: networkId,
-        bundle_amount: dataAmount,
-        description: result.message || 'Provider error'
-      });
       return NextResponse.json({ error: result.message || 'Purchase failed' }, { status: 400 });
     }
 
+    // Atomic transaction: Deduct balance and log locally
     await supabase.rpc('purchase_bundle_and_log_transaction', {
       p_user_id: session.user.id,
       p_amount: -price,
-      p_transaction_code: result.transactionCode,
+      p_transaction_code: result.transactionCode || result.transactionId,
       p_status: 'success',
       p_recipient_msisdn: recipientMsisdn,
       p_network_id: networkId,

@@ -4,12 +4,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  const apiKey = process.env.CHEAP_BUNDLES_API_KEY;
-  const apiUrl = process.env.CHEAP_BUNDLES_API_URL;
-
-  if (!apiKey || !apiUrl) {
-    return NextResponse.json({ error: 'Service not configured' }, { status: 500 });
-  }
+  const apiKey = "6C0gNLA90BmVVMaZOgOglMFF0mvR4uczlnSPj5beLY";
+  const apiUrl = "https://cheap-bundles-ghana.azurewebsites.net";
 
   try {
     const response = await fetch(`${apiUrl}/api/external/packages/all-packages`, {
@@ -21,7 +17,9 @@ export async function GET(request: NextRequest) {
       cache: 'no-store',
     });
 
-    if (!response.ok) return new NextResponse(await response.text(), { status: response.status });
+    if (!response.ok) {
+      return NextResponse.json({ error: 'Provider Error' }, { status: response.status });
+    }
 
     const data = await response.json();
     return NextResponse.json(data.packages || data);
