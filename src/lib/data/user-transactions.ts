@@ -1,10 +1,15 @@
+// src/lib/data/user-transactions.ts
+
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Transaction } from "@/lib/definitions";
 import {
-  buildApiOrderStatusLookup,
+  buildPhoneProfileMap,
   fetchExternalAllOrdersRaw,
+  normalizeExternalOrder,
+  type AdminOrderRow,
 } from "@/lib/external-all-orders";
+import { normalizePhoneNumber } from "@/lib/networks";
 
 const FETCH_LIMIT = 200;
 
@@ -16,7 +21,16 @@ function isPurchaseRow(t: Transaction): boolean {
   return Number.isFinite(amt) && amt < 0;
 }
 
-/** Same resolution order as admin `overrideKey` where we have DB fields (reference, code, row id). */
+/** Same key as admin `AdminOrdersTable` / `overrideKey`. */
+function adminOverrideKey(row: AdminOrderRow): string {
+  return (
+    row.reference ||
+    row.transaction_code ||
+    row.provider_order_id ||
+    row.id
+  ).trim();
+}
+
 function transactionLookupKeys(t: Transaction): string[] {
   const keys: string[] = [];
   const r = t.reference?.trim();
@@ -27,47 +41,82 @@ function transactionLookupKeys(t: Transaction): string[] {
   return [...new Set(keys)];
 }
 
-async function fetchOverridesForKeys(
-  keys: string[]
-): Promise<Record<string, string>> {
-  if (keys.length === 0) return {};
-  const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("provider_order_overrides")
-    .select("transaction_id, status")
-    .in("transaction_id", keys);
-
-  if (error) {
-    console.error("fetchOverridesForKeys:", error.message);
-    return {};
-  }
-
-  const out: Record<string, string> = {};
-  for (const row of data ?? []) {
-    const id = row.transaction_id as string | undefined;
-    if (id) out[id] = String(row.status);
-  }
-  return out;
-}
-
-function pickFirstStatus(
+/** Match when DB still has provider id / code, or UUID id lines up. */
+function findMatchingApiRowByKeys(
   t: Transaction,
-  byKey: Record<string, string> | Map<string, string>
-): string | undefined {
-  for (const k of transactionLookupKeys(t)) {
-    const v = byKey instanceof Map ? byKey.get(k) : byKey[k];
-    if (v != null && String(v).trim() !== "") return String(v).trim();
+  rows: AdminOrderRow[]
+): AdminOrderRow | undefined {
+  const tk = new Set(transactionLookupKeys(t).map((x) => x.trim()));
+  for (const r of rows) {
+    for (const k of [
+      r.reference,
+      r.transaction_code,
+      r.provider_order_id,
+      r.id,
+    ]) {
+      const s = k != null ? String(k).trim() : "";
+      if (s && tk.has(s)) return r;
+    }
   }
   return undefined;
 }
 
 /**
- * Purchases for the current session user (`userId` must match the JWT; RLS enforces).
- *
- * Status shown:
- * 1) Admin override (`provider_order_overrides`) if any key matches this transaction.
- * 2) Else status from the provider “all orders” API (same payload as admin list).
- * 3) Else `transactions.status` from the database.
+ * When `reference` is still `loc-…`, keys don't match API ids — align by beneficiary,
+ * price, network, and closest timestamp (same idea as reconciling to admin list).
+ */
+function findMatchingApiRowByHeuristic(
+  t: Transaction,
+  rows: AdminOrderRow[]
+): AdminOrderRow | undefined {
+  const phone = normalizePhoneNumber(String(t.recipient_msisdn ?? ""));
+  if (phone.length < 10) return undefined;
+
+  const absAmt = Math.abs(Number(t.amount));
+  if (!Number.isFinite(absAmt)) return undefined;
+
+  const tNet = t.network_id;
+  const tTime = new Date(t.created_at).getTime();
+
+  const candidates = rows.filter((r) => {
+    const rp = normalizePhoneNumber(String(r.recipient_msisdn ?? ""));
+    if (rp !== phone) return false;
+    if (Math.abs(absAmt - r.amount) > 0.06) return false;
+    if (tNet != null && r.network_id != null && tNet !== r.network_id) {
+      return false;
+    }
+    return true;
+  });
+
+  if (candidates.length === 0) return undefined;
+
+  candidates.sort(
+    (a, b) =>
+      Math.abs(new Date(a.created_at).getTime() - tTime) -
+      Math.abs(new Date(b.created_at).getTime() - tTime)
+  );
+  return candidates[0];
+}
+
+function resolveStatusLikeAdmin(
+  t: Transaction,
+  externalRows: AdminOrderRow[],
+  overrides: Record<string, string>
+): string {
+  const matched =
+    findMatchingApiRowByKeys(t, externalRows) ??
+    findMatchingApiRowByHeuristic(t, externalRows);
+
+  if (!matched) return t.status;
+
+  const k = adminOverrideKey(matched);
+  return overrides[k] ?? matched.status;
+}
+
+/**
+ * Purchases for the current session user (RLS).
+ * Status matches admin “All orders”: provider row + `provider_order_overrides`,
+ * resolving `loc-…` rows to API rows by id when possible, else phone/amount/time.
  */
 export async function fetchMyPurchaseTransactionsForUser(
   userId: string
@@ -88,30 +137,38 @@ export async function fetchMyPurchaseTransactionsForUser(
   const rows = (data ?? []) as Transaction[];
   const purchases = rows.filter(isPurchaseRow);
 
-  let apiByKey = new Map<string, string>();
+  let externalRows: AdminOrderRow[] = [];
+  let overrides: Record<string, string> = {};
+
   try {
-    const rawOrders = await fetchExternalAllOrdersRaw();
-    apiByKey = buildApiOrderStatusLookup(rawOrders);
+    const admin = createAdminClient();
+    const [{ data: profiles }, { data: ovRows }, rawExternal] = await Promise.all([
+      admin.from("profiles").select("id,email,full_name,phone_number"),
+      admin.from("provider_order_overrides").select("transaction_id,status"),
+      fetchExternalAllOrdersRaw(),
+    ]);
+
+    const phoneMap = buildPhoneProfileMap(profiles || []);
+    for (const raw of rawExternal) {
+      const row = normalizeExternalOrder(raw, phoneMap);
+      if (row) externalRows.push(row);
+    }
+
+    for (const o of ovRows ?? []) {
+      const id = o.transaction_id as string | undefined;
+      if (id) overrides[id] = String(o.status);
+    }
   } catch (e) {
-    console.error("fetchMyPurchaseTransactionsForUser: external orders", e);
+    console.error("fetchMyPurchaseTransactionsForUser: external/overrides", e);
   }
 
-  const allKeys = new Set<string>();
-  for (const t of purchases) {
-    for (const k of transactionLookupKeys(t)) allKeys.add(k);
-  }
-
-  const overrides = await fetchOverridesForKeys([...allKeys]);
-
-  return purchases.map((t) => {
-    const fromAdmin = pickFirstStatus(t, overrides);
-    const fromApi = pickFirstStatus(t, apiByKey);
-    const status = fromAdmin ?? fromApi ?? t.status;
-    return { ...t, status };
-  });
+  return purchases.map((t) => ({
+    ...t,
+    status: resolveStatusLikeAdmin(t, externalRows, overrides),
+  }));
 }
 
-/** Server Components: resolves the session then loads purchases from Supabase (RLS). */
+/** Server Components: resolves the session then loads purchases. */
 export async function fetchMyPurchaseTransactions(): Promise<Transaction[]> {
   const supabase = await createClient();
   const {

@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   buildPhoneProfileMap,
+  enrichAdminOrderRowsWithLedgerBuyers,
   fetchExternalAllOrdersRaw,
   normalizeExternalOrder,
   type AdminOrderRow,
@@ -33,6 +34,8 @@ export default async function MyAdminOrdersPage() {
     const row = normalizeExternalOrder(raw, phoneMap);
     if (row) externalRows.push(row);
   }
+
+  await enrichAdminOrderRowsWithLedgerBuyers(externalRows, admin);
 
   const { data: ovRows } = await admin
     .from("provider_order_overrides")

@@ -9,6 +9,7 @@ import {
 import { readFetchJson } from "@/lib/fetch-json";
 import { normalizePhoneNumber } from "@/lib/networks";
 import { displayNetworkIdToApi } from "@/lib/network-id-map";
+import { notifyAdminBundlePurchase } from "@/lib/server/notifications";
 
 function providerTxCode(result: unknown): string | null {
   if (!result || typeof result !== "object") return null;
@@ -22,6 +23,59 @@ function providerMessage(result: unknown): string {
   const o = result as Record<string, unknown>;
   const m = o.message ?? o.error ?? o.detail;
   return m != null ? String(m) : "Unknown external API error";
+}
+
+/** Provider still placed / queued work but returned an error-shaped response — keep wallet debit. */
+function isDuplicateOrConflictResponse(
+  httpStatus: number,
+  msg: string,
+  result: unknown
+): boolean {
+  if (httpStatus === 409) return true;
+  const m = msg.toLowerCase();
+  if (
+    /already in progress/.test(m) ||
+    /please wait or check existing orders/.test(m) ||
+    /duplicate|conflicting transaction/.test(m) ||
+    /order already exist/.test(m) ||
+    /already exists/.test(m) ||
+    /already exist/.test(m)
+  ) {
+    return true;
+  }
+  if (result && typeof result === "object") {
+    const o = result as Record<string, unknown>;
+    const code = String(o.code ?? o.error_code ?? "").toLowerCase();
+    if (code.includes("duplicate") || code.includes("conflict")) return true;
+  }
+  return false;
+}
+
+async function tryUpdateTransactionToPlaced(
+  admin: SupabaseClient,
+  userId: string,
+  localReference: string,
+  providerCode: string,
+  description: string
+): Promise<void> {
+  const patch = {
+    reference: providerCode,
+    transaction_code: providerCode,
+    status: "placed",
+    description,
+  };
+  let { error: updateErr } = await admin
+    .from("transactions")
+    .update(patch)
+    .eq("user_id", userId)
+    .eq("reference", localReference);
+  if (updateErr) {
+    await admin
+      .from("transactions")
+      .update(patch)
+      .eq("user_id", userId)
+      .eq("transaction_code", localReference);
+  }
 }
 
 /**
@@ -229,22 +283,64 @@ export async function POST(req: NextRequest) {
           : rawText.slice(0, 400);
       console.warn("External buy-other HTTP", status, msg);
 
-      if (
-        status === 409 ||
-        /already in progress/i.test(msg) ||
-        /please wait or check existing orders/i.test(msg) ||
-        /duplicate|conflicting transaction/i.test(msg)
-      ) {
-        await abortPendingPurchase(admin, user.id, reference, balanceBefore);
+      if (isDuplicateOrConflictResponse(status, msg, result)) {
+        const providerCode =
+          result && typeof result === "object"
+            ? providerTxCode(result)
+            : null;
+        if (providerCode) {
+          await tryUpdateTransactionToPlaced(
+            admin,
+            user.id,
+            reference,
+            providerCode,
+            description
+          );
+          void notifyAdminBundlePurchase({
+            userId: user.id,
+            orderId: providerCode,
+            amountGhs: p,
+            dataAmount,
+            networkId,
+            recipientMsisdn: recipient_msisdn,
+          });
+          return NextResponse.json({
+            success: true,
+            transaction_code: providerCode,
+            reference: providerCode,
+            notice:
+              "Provider returned a duplicate/conflict response but included an order reference; your wallet was charged.",
+            ...(typeof result === "object" && result !== null ? result : {}),
+          });
+        }
+
+        await admin
+          .from("transactions")
+          .update({
+            status: "processing",
+            description: `${description} [Provider duplicate/conflict — wallet charged]`,
+          })
+          .eq("user_id", user.id)
+          .eq("reference", reference);
+
+        void notifyAdminBundlePurchase({
+          userId: user.id,
+          orderId: reference,
+          amountGhs: p,
+          dataAmount,
+          networkId,
+          recipientMsisdn: recipient_msisdn,
+        });
+
         return NextResponse.json(
           {
-            error:
-              msg ||
-              "Duplicate or conflicting transaction: the provider already has an order in progress for this number and bundle size. Wait or check My Orders.",
-            code: "ORDER_IN_PROGRESS",
-            httpStatus: 409,
+            success: true,
+            reference,
+            code: "ORDER_CONFLICT_CHARGED",
+            warning:
+              "The provider reported a duplicate or conflicting order. Your wallet has been charged. Check My Orders or contact support if data does not arrive.",
           },
-          { status: 409 }
+          { status: 200 }
         );
       }
 
@@ -264,11 +360,69 @@ export async function POST(req: NextRequest) {
       (result as { success?: boolean }).success === true;
 
     if (!success) {
+      const failMsg = providerMessage(result);
+      if (isDuplicateOrConflictResponse(200, failMsg, result)) {
+        const providerCode = providerTxCode(result);
+        if (providerCode) {
+          await tryUpdateTransactionToPlaced(
+            admin,
+            user.id,
+            reference,
+            providerCode,
+            description
+          );
+          void notifyAdminBundlePurchase({
+            userId: user.id,
+            orderId: providerCode,
+            amountGhs: p,
+            dataAmount,
+            networkId,
+            recipientMsisdn: recipient_msisdn,
+          });
+          return NextResponse.json({
+            success: true,
+            transaction_code: providerCode,
+            reference: providerCode,
+            notice:
+              "Provider reported failure wording consistent with duplicate/conflict but supplied a reference; wallet charged.",
+            ...(typeof result === "object" && result !== null ? result : {}),
+          });
+        }
+
+        await admin
+          .from("transactions")
+          .update({
+            status: "processing",
+            description: `${description} [Provider duplicate/conflict — wallet charged]`,
+          })
+          .eq("user_id", user.id)
+          .eq("reference", reference);
+
+        void notifyAdminBundlePurchase({
+          userId: user.id,
+          orderId: reference,
+          amountGhs: p,
+          dataAmount,
+          networkId,
+          recipientMsisdn: recipient_msisdn,
+        });
+
+        return NextResponse.json(
+          {
+            success: true,
+            reference,
+            code: "ORDER_CONFLICT_CHARGED",
+            warning:
+              "The provider indicated a duplicate or conflicting order. Your wallet has been charged. Check My Orders or contact support if data does not arrive.",
+          },
+          { status: 200 }
+        );
+      }
+
       await abortPendingPurchase(admin, user.id, reference, balanceBefore);
       return NextResponse.json(
         {
-          error:
-            providerMessage(result) || "Failed to purchase bundle from provider",
+          error: failMsg || "Failed to purchase bundle from provider",
         },
         { status: 400 }
       );
@@ -307,6 +461,15 @@ export async function POST(req: NextRequest) {
         .eq("user_id", user.id)
         .eq("transaction_code", reference));
     }
+
+    void notifyAdminBundlePurchase({
+      userId: user.id,
+      orderId: providerCode,
+      amountGhs: p,
+      dataAmount,
+      networkId,
+      recipientMsisdn: recipient_msisdn,
+    });
 
     if (updateErr) {
       console.error("buy-bundle post-provider update:", updateErr);

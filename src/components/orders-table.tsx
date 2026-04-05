@@ -17,7 +17,6 @@ import {
   CheckCircle2,
   XCircle,
   Pencil,
-  Check,
   X,
 } from 'lucide-react';
 import {
@@ -39,7 +38,6 @@ const networkMap = new Map(NETWORKS.map((n) => [n.id, n.name]));
 
 export function orderStatusBadge(rawStatus: string) {
   const bucket = classifyOrderStatusForDisplay(rawStatus);
-  // Show the exact raw label in the badge, not a bucketed label
   const displayLabel = normalizeOrderStatus(rawStatus).toUpperCase() || 'UNKNOWN';
 
   if (bucket === 'placed')
@@ -90,7 +88,6 @@ function StatusCell({
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Best key for override lookup (reference > transaction_code > id)
   const overrideKey =
     row.reference?.trim() || row.transaction_code?.trim() || row.id;
 

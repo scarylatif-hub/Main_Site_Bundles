@@ -8,6 +8,7 @@ import { readFetchJson } from "@/lib/fetch-json";
 import { apiNetworkIdToDisplay } from "@/lib/network-id-map";
 import { getRetailPriceGhs } from "@/lib/retail-prices";
 import { NETWORKS, normalizePhoneNumber } from "@/lib/networks";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type AdminOrderRow = {
   id: string;
@@ -303,4 +304,128 @@ export function buildPhoneProfileMap(
     });
   }
   return m;
+}
+
+type LedgerPurchaseRow = {
+  user_id: string;
+  reference: string | null;
+  transaction_code: string | null;
+  recipient_msisdn: string | null;
+  created_at: string;
+  amount: number;
+};
+
+/**
+ * When the API beneficiary phone ≠ any `profiles.phone_number`, the customer column
+ * shows "—". Fill from ledger purchases (`transactions.user_id` → profile) using
+ * provider id / reference overlap, else phone + amount + time (same idea as user orders).
+ */
+export async function enrichAdminOrderRowsWithLedgerBuyers(
+  rows: AdminOrderRow[],
+  admin: SupabaseClient
+): Promise<void> {
+  if (rows.length === 0) return;
+
+  const since = new Date();
+  since.setDate(since.getDate() - 150);
+
+  const { data: txs, error: txErr } = await admin
+    .from("transactions")
+    .select(
+      "user_id, reference, transaction_code, recipient_msisdn, created_at, amount"
+    )
+    .eq("transaction_type", "purchase")
+    .gte("created_at", since.toISOString())
+    .order("created_at", { ascending: false })
+    .limit(2000);
+
+  if (txErr) {
+    console.error("enrichAdminOrderRowsWithLedgerBuyers:", txErr.message);
+    return;
+  }
+
+  const { data: profiles } = await admin
+    .from("profiles")
+    .select("id, email, full_name");
+
+  const profileById = new Map(
+    (profiles ?? []).map((p) => [
+      p.id,
+      { email: (p.email ?? "").trim(), name: (p.full_name ?? "").trim() },
+    ])
+  );
+
+  const list = (txs ?? []) as LedgerPurchaseRow[];
+
+  function applyFromTx(row: AdminOrderRow, tx: LedgerPurchaseRow): void {
+    const p = profileById.get(tx.user_id);
+    if (!p?.email) return;
+    row.customerEmail = p.email;
+    row.customerName = p.name;
+    row.user_id = tx.user_id;
+  }
+
+  function rowApiKeys(r: AdminOrderRow): string[] {
+    const out: string[] = [];
+    for (const k of [r.reference, r.transaction_code, r.provider_order_id, r.id]) {
+      const s = k != null ? String(k).trim() : "";
+      if (s) out.push(s);
+    }
+    return out;
+  }
+
+  function txKeys(tx: LedgerPurchaseRow): string[] {
+    const out: string[] = [];
+    for (const k of [tx.reference, tx.transaction_code]) {
+      const s = k != null ? String(k).trim() : "";
+      if (s) out.push(s);
+    }
+    return out;
+  }
+
+  function findTxByKeys(row: AdminOrderRow): LedgerPurchaseRow | undefined {
+    const rk = new Set(rowApiKeys(row));
+    for (const tx of list) {
+      for (const k of txKeys(tx)) {
+        if (rk.has(k)) return tx;
+      }
+    }
+    return undefined;
+  }
+
+  function findTxByHeuristic(row: AdminOrderRow): LedgerPurchaseRow | undefined {
+    const phone = normalizePhone(row.recipient_msisdn);
+    if (!phone) return undefined;
+    const absAmt = row.amount;
+    const tTime = new Date(row.created_at).getTime();
+    let best: LedgerPurchaseRow | undefined;
+    let bestDelta = Infinity;
+    for (const tx of list) {
+      const tp = normalizePhone(tx.recipient_msisdn);
+      if (tp !== phone) continue;
+      if (Math.abs(Math.abs(Number(tx.amount)) - absAmt) > 0.06) continue;
+      const d = Math.abs(new Date(tx.created_at).getTime() - tTime);
+      if (d < bestDelta) {
+        bestDelta = d;
+        best = tx;
+      }
+    }
+    return best;
+  }
+
+  for (const row of rows) {
+    const missing =
+      !row.customerEmail ||
+      row.customerEmail === "—" ||
+      row.customerEmail.trim() === "";
+    if (!missing) continue;
+
+    const byKey = findTxByKeys(row);
+    if (byKey) {
+      applyFromTx(row, byKey);
+      continue;
+    }
+    const byHeur = findTxByHeuristic(row);
+    if (byHeur) applyFromTx(row, byHeur);
+  }
 }

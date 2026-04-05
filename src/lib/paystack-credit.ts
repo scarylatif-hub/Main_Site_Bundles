@@ -1,4 +1,7 @@
+// src/lib/paystack.ts
+
 import { createAdminClient } from "@/lib/supabase/admin";
+import { notifyAdminWalletDepositCredited } from "@/lib/server/notifications";
 
 export type PaystackVerifyData = {
   status: string;
@@ -73,6 +76,11 @@ async function claimPaystackDeposit(
 
   const row = data as { credited?: boolean; reason?: string } | null;
   if (row?.credited === true) {
+    void notifyAdminWalletDepositCredited({
+      userId,
+      reference,
+      amountGhs: creditAmountGhs, // ← fixed: was `creditAmountGhs` key, now matches the param name
+    });
     return { credited: true, reason: "ok" };
   }
   if (row?.reason === "already_processed") {

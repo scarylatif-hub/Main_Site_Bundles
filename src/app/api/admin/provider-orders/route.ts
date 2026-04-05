@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin-api";
 import { isOrderStatusAllowed } from "@/lib/order-status";
+import { notifyAdminOrderDeliveredIfNeeded } from "@/lib/server/notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +40,14 @@ export async function PATCH(request: NextRequest) {
     );
   }
 
+  const { data: existing } = await ctx.admin
+    .from("provider_order_overrides")
+    .select("status")
+    .eq("transaction_id", transaction_id)
+    .maybeSingle();
+
+  const previousStatus = existing?.status ?? null;
+
   const { error } = await ctx.admin.from("provider_order_overrides").upsert(
     {
       transaction_id,
@@ -59,6 +68,13 @@ export async function PATCH(request: NextRequest) {
       { status: 500 }
     );
   }
+
+  void notifyAdminOrderDeliveredIfNeeded({
+    admin: ctx.admin,
+    transaction_id,
+    previousStatus,
+    newStatus: status.toLowerCase(),
+  });
 
   return NextResponse.json({ ok: true, transaction_id, status });
 }
