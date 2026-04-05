@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import type { Profile } from "@/lib/definitions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,9 +24,58 @@ import {
 import { ADMIN_EMAIL } from "@/lib/admin-config";
 import { useToast } from "@/hooks/use-toast";
 
+const PAGE_SIZE = 20;
+
+function TablePaginationBar({
+  pageIndex,
+  pageCount,
+  totalRows,
+  onPageChange,
+}: {
+  pageIndex: number;
+  pageCount: number;
+  totalRows: number;
+  onPageChange: (p: number) => void;
+}) {
+  if (pageCount <= 1) return null;
+  return (
+    <div className="flex items-center justify-between text-sm text-muted-foreground">
+      <span>
+        Page {pageIndex + 1} of {pageCount} &mdash; {totalRows} users
+      </span>
+      <div className="flex gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={pageIndex === 0}
+          onClick={() => onPageChange(pageIndex - 1)}
+        >
+          Previous
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={pageIndex >= pageCount - 1}
+          onClick={() => onPageChange(pageIndex + 1)}
+        >
+          Next
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function AdminUsersClient({ users }: { users: Profile[] }) {
   const { toast } = useToast();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pageIndex, setPageIndex] = useState(0);
+
+  const pageCount = Math.max(1, Math.ceil(users.length / PAGE_SIZE));
+
+  const pagedUsers = useMemo(
+    () => users.slice(pageIndex * PAGE_SIZE, (pageIndex + 1) * PAGE_SIZE),
+    [users, pageIndex]
+  );
 
   async function deleteUser(id: string, email: string) {
     if (!confirm(`Delete user ${email}? This cannot be undone.`)) return;
@@ -50,57 +99,57 @@ export function AdminUsersClient({ users }: { users: Profile[] }) {
 
   return (
     <div className="space-y-4">
-    <div className="rounded-md border bg-card overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Name</TableHead>
-            <TableHead>Email</TableHead>
-            <TableHead>Phone</TableHead>
-            <TableHead className="text-right">Balance</TableHead>
-            <TableHead className="text-right">Actions</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {pagedUsers.map((u) => {
-            const isPrimaryAdmin =
-              u.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-            return (
-              <TableRow key={u.id}>
-                <TableCell className="font-medium">{u.full_name}</TableCell>
-                <TableCell className="text-sm">{u.email}</TableCell>
-                <TableCell className="text-sm">{u.phone_number}</TableCell>
-                <TableCell className="text-right tabular-nums">
-                  GHS {Number(u.wallet_balance).toFixed(2)}
-                </TableCell>
-                <TableCell className="text-right space-x-2">
-                  <BalanceDialog
-                    userId={u.id}
-                    current={Number(u.wallet_balance)}
-                    disabled={busyId === u.id}
-                    onSaved={() => window.location.reload()}
-                  />
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    disabled={isPrimaryAdmin || busyId === u.id}
-                    onClick={() => deleteUser(u.id, u.email)}
-                  >
-                    Delete
-                  </Button>
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-    </div>
-    <TablePaginationBar
-      pageIndex={pageIndex}
-      pageCount={pageCount}
-      totalRows={users.length}
-      onPageChange={setPageIndex}
-    />
+      <div className="rounded-md border bg-card overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Email</TableHead>
+              <TableHead>Phone</TableHead>
+              <TableHead className="text-right">Balance</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {pagedUsers.map((u) => {
+              const isPrimaryAdmin =
+                u.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+              return (
+                <TableRow key={u.id}>
+                  <TableCell className="font-medium">{u.full_name}</TableCell>
+                  <TableCell className="text-sm">{u.email}</TableCell>
+                  <TableCell className="text-sm">{u.phone_number}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    GHS {Number(u.wallet_balance).toFixed(2)}
+                  </TableCell>
+                  <TableCell className="text-right space-x-2">
+                    <BalanceDialog
+                      userId={u.id}
+                      current={Number(u.wallet_balance)}
+                      disabled={busyId === u.id}
+                      onSaved={() => window.location.reload()}
+                    />
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      disabled={isPrimaryAdmin || busyId === u.id}
+                      onClick={() => deleteUser(u.id, u.email)}
+                    >
+                      Delete
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+      <TablePaginationBar
+        pageIndex={pageIndex}
+        pageCount={pageCount}
+        totalRows={users.length}
+        onPageChange={setPageIndex}
+      />
     </div>
   );
 }
@@ -218,7 +267,10 @@ function BalanceDialog({
         </DialogHeader>
         <div className="space-y-4 py-2">
           <p className="text-sm text-muted-foreground">
-            Current: <span className="font-semibold text-foreground">GHS {current.toFixed(2)}</span>
+            Current:{" "}
+            <span className="font-semibold text-foreground">
+              GHS {current.toFixed(2)}
+            </span>
           </p>
           <div className="space-y-2">
             <Label htmlFor="adj">Adjustment (GHS)</Label>
