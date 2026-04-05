@@ -28,6 +28,7 @@ import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase/client";
 
 
 const passwordValidation = new RegExp(
@@ -97,13 +98,24 @@ export default function SignupPage() {
 
         console.log('Signup successful:', signupResult);
 
-        toast({
-            title: "Account Created",
-            description: "Your account has been successfully created. Welcome!",
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+            email: data.email,
+            password: data.password,
         });
 
-        // Navigate to home page
+        if (signInError) {
+            throw new Error(
+                'Account created but automatic login failed. Please sign in manually.'
+            );
+        }
+
+        toast({
+            title: "Account Created",
+            description: "You're signed in. Welcome!",
+        });
+
         router.push("/");
+        router.refresh();
     } catch (error: any) {
         console.error("Signup Error:", error);
         toast({

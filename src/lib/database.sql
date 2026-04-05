@@ -25,6 +25,7 @@ DROP TABLE IF EXISTS public.transactions CASCADE;
 CREATE TABLE public.transactions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id uuid NOT NULL REFERENCES public.profiles ON DELETE CASCADE,
+    reference text NOT NULL UNIQUE,
     transaction_code text UNIQUE,
     transaction_type text NOT NULL,
     recipient_msisdn text,
@@ -51,6 +52,11 @@ DROP POLICY IF EXISTS "Users can view their own profile." ON public.profiles;
 DROP POLICY IF EXISTS "Users can update their own profile." ON public.profiles;
 DROP POLICY IF EXISTS "Users can view their own transactions." ON public.transactions;
 DROP POLICY IF EXISTS "Users can insert their own transactions." ON public.transactions;
+DROP POLICY IF EXISTS "Users can update their own transactions." ON public.transactions;
+DROP POLICY IF EXISTS "Users can delete their own transactions." ON public.transactions;
+DROP POLICY IF EXISTS "transactions_select_own" ON public.transactions;
+DROP POLICY IF EXISTS "transactions_insert_own" ON public.transactions;
+DROP POLICY IF EXISTS "transactions_admin_all" ON public.transactions;
 
 -- Policies for profiles table
 -- Allow users to view their own profile
@@ -63,16 +69,29 @@ CREATE POLICY "Users can update their own profile."
   ON public.profiles FOR UPDATE
   USING (auth.uid() = id);
 
--- Policies for transactions table
--- Allow users to view their own transactions
-CREATE POLICY "Users can view their own transactions."
-  ON public.transactions FOR SELECT
+-- Policies for transactions table (see migrations/004_transactions_reference_rls.sql for upgrades)
+CREATE POLICY "transactions_select_own"
+  ON public.transactions FOR SELECT TO authenticated
   USING (auth.uid() = user_id);
 
--- Allow users to insert their own transactions
-CREATE POLICY "Users can insert their own transactions."
-  ON public.transactions FOR INSERT
+CREATE POLICY "transactions_insert_own"
+  ON public.transactions FOR INSERT TO authenticated
   WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "transactions_admin_all"
+  ON public.transactions FOR ALL TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_admin IS TRUE
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.profiles p
+      WHERE p.id = auth.uid() AND p.is_admin IS TRUE
+    )
+  );
 
 
 -- ===============================================================================================
@@ -158,12 +177,14 @@ BEGIN
     transaction_type,
     status,
     transaction_code,
+    reference,
     description
   ) VALUES (
     p_user_id,
     p_amount,
     p_transaction_type,
     p_status,
+    p_transaction_code,
     p_transaction_code,
     p_description
   );
@@ -214,6 +235,7 @@ BEGIN
     transaction_type,
     status,
     transaction_code,
+    reference,
     recipient_msisdn,
     network_id,
     shared_bundle,
@@ -224,6 +246,7 @@ BEGIN
     -p_amount,
     'purchase',
     p_status,
+    p_transaction_code,
     p_transaction_code,
     p_recipient_msisdn,
     p_network_id,
@@ -253,6 +276,3 @@ $$ LANGUAGE plpgsql;
 -- ===============================================================================================
 -- END OF SCRIPT - DATABASE READY
 -- ===============================================================================================
-Error: Failed to run sql query: ERROR: 42723: function "handle_new_user" already exists with same argument types
-
-

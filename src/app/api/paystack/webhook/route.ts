@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 import crypto from 'crypto';
+import { creditWalletFromPaystackSuccess } from '@/lib/paystack-credit';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,59 +46,35 @@ export async function POST(request: NextRequest) {
 
     // Handle different event types
     if (event === 'charge.success') {
-      const { reference, amount, metadata, customer, status } = eventData;
+      const { reference, amount, metadata, status } = eventData;
 
-      const cookieStore = cookies();
-      const supabase = createClient(cookieStore);
-
-      // Extract user ID from metadata or reference
-      const userId = metadata?.userId || reference.split('_')[1];
-
-      if (!userId) {
-        console.error('No user ID found in webhook data');
-        return NextResponse.json({ ok: true }); // Still return 200 to acknowledge
-      }
-
-      // Verify the payment was successful
       if (status !== 'success') {
         console.warn(`Payment not successful: ${status}`);
         return NextResponse.json({ ok: true });
       }
 
-      const amountGhs = amount / 100; // Convert from kobo to GHS
-      const transactionType = metadata?.type || 'deposit';
-
-      try {
-        // Call the RPC function to add funds to wallet
-        const { error: rpcError } = await supabase.rpc(
-          'add_to_wallet_and_log_transaction',
-          {
-            p_user_id: userId,
-            p_amount: amountGhs,
-            p_transaction_type: transactionType,
-            p_status: 'success',
-            p_transaction_code: reference,
-            p_description: metadata?.description || `Payment via Paystack: ${reference}`,
-          }
-        );
-
-        if (rpcError) {
-          console.error('RPC error:', rpcError);
-          return NextResponse.json(
-            { error: 'Failed to process payment' },
-            { status: 500 }
-          );
-        }
-
-        console.log(`✅ Payment processed: ${amount} kobo for user ${userId}`);
+      const userId = metadata?.userId;
+      if (!userId) {
+        console.error('No user ID found in webhook data');
         return NextResponse.json({ ok: true });
-      } catch (error) {
-        console.error('Error processing payment:', error);
-        return NextResponse.json(
-          { error: 'Internal server error' },
-          { status: 500 }
-        );
       }
+
+      const result = await creditWalletFromPaystackSuccess({
+        status: 'success',
+        reference,
+        amount,
+        metadata: {
+          userId,
+          type: metadata?.type,
+          description:
+            metadata?.description || `Payment via Paystack: ${reference}`,
+        },
+      });
+
+      console.log(
+        `Paystack webhook ${reference}: credited=${result.credited} reason=${result.reason ?? 'ok'}`
+      );
+      return NextResponse.json({ ok: true });
     }
 
     // For other events, just acknowledge receipt

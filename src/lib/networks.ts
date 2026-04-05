@@ -1,8 +1,11 @@
 import type { Network, NetworkName } from './definitions';
 
 export const NETWORKS: Network[] = [
-  { id: 1, name: 'MTN', prefixes: ['024', '054', '055', '059'] },
+  /** MTN */
+  { id: 1, name: 'MTN', prefixes: ['024', '025', '053', '054', '055', '059'] },
+  /** Telecel (formerly Vodafone) */
   { id: 2, name: 'Telecel', prefixes: ['020', '050'] },
+  /** AirtelTigo */
   { id: 3, name: 'AirtelTigo', prefixes: ['027', '057', '026', '056'] },
 ];
 
@@ -39,6 +42,7 @@ export const detectNetwork = (phone: string): Network | null => {
 };
 
 export const validatePhoneNumber = (phone: string): boolean => {
-    const normalized = normalizePhoneNumber(phone);
-    return /^0(20|50|24|54|55|59|27|57|26|56)\d{7}$/.test(normalized);
-}
+  const normalized = normalizePhoneNumber(phone);
+  // MTN 024,025,053,054,055,059 | Telecel 020,050 | AirtelTigo 026,027,056,057
+  return /^0(20|24|25|26|27|50|53|54|55|56|57|59)\d{7}$/.test(normalized);
+};

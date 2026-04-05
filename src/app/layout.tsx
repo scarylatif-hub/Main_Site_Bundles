@@ -3,10 +3,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { cn } from '@/lib/utils';
 import { Providers } from '@/components/providers';
-import { Header } from '@/components/header';
-import { Footer } from '@/components/footer';
+import { SiteChrome } from '@/components/site-chrome';
 import { Toaster } from '@/components/ui/toaster';
-import { MobileBottomNav } from '@/components/mobile-bottom-nav';
 
 export const metadata: Metadata = {
   title: 'SB Bundles - Affordable Data Bundles',
@@ -28,12 +26,7 @@ export default function RootLayout({
       </head>
       <body className={cn('min-h-screen bg-background font-body antialiased')}>
         <Providers>
-          <div className="relative flex min-h-screen flex-col">
-            <Header />
-            <main className="flex-1 pb-20 md:pb-0">{children}</main>
-            <Footer />
-            <MobileBottomNav />
-          </div>
+          <SiteChrome>{children}</SiteChrome>
           <Toaster />
         </Providers>
       </body>

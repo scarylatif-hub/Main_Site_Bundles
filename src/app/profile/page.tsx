@@ -39,7 +39,7 @@ export default function ProfilePage() {
   const userInitials =
     displayName
       ?.split(" ")
-      .map((n) => n[0])
+      .map((n: string) => n[0])
       .join("")
       .toUpperCase() ||
     user.email?.[0].toUpperCase() ||

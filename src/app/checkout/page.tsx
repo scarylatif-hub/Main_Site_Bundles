@@ -11,13 +11,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/auth-context";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { CartItem } from "@/lib/definitions";
+import { normalizePhoneNumber } from "@/lib/networks";
 
 type PurchaseResult = {
     item: CartItem;
     success: boolean;
     message: string;
+    code?: string;
 };
 
 export default function CheckoutPage() {
@@ -28,6 +30,7 @@ export default function CheckoutPage() {
     
     const [isProcessing, setIsProcessing] = useState(false);
     const [purchaseResults, setPurchaseResults] = useState<PurchaseResult[]>([]);
+    const payLockRef = useRef(false);
 
     const walletBalance = userProfile?.wallet_balance ?? 0;
     const isSufficient = walletBalance >= totalPrice;
@@ -42,15 +45,49 @@ export default function CheckoutPage() {
             return;
         }
 
+        if (payLockRef.current || isProcessing) return;
+        payLockRef.current = true;
+
+        const lineKey = (i: CartItem) =>
+            `${normalizePhoneNumber(i.recipientMsisdn)}|${i.networkId}|${i.sharedBundle}`;
+        const seen = new Set<string>();
+        for (const item of cartItems) {
+            const k = lineKey(item);
+            if (seen.has(k)) {
+                toast({
+                    title: "Duplicate lines in cart",
+                    description:
+                        "You have the same phone number, network, and bundle size twice. Remove the duplicate or pay for one line at a time — otherwise the second request returns 409 (conflict) from the provider.",
+                    variant: "destructive",
+                });
+                payLockRef.current = false;
+                return;
+            }
+            seen.add(k);
+        }
+
         setIsProcessing(true);
         setPurchaseResults([]);
 
         const results: PurchaseResult[] = [];
-        for (const item of cartItems) {
+        let runningBalance = walletBalance;
+
+        try {
+            for (const item of cartItems) {
             try {
+                if (runningBalance < item.price) {
+                    results.push({
+                        item,
+                        success: false,
+                        message: 'Insufficient wallet balance for this item.',
+                    });
+                    continue;
+                }
+
                 const response = await fetch('/api/buy-bundle', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
                     body: JSON.stringify({
                         recipientMsisdn: item.recipientMsisdn,
                         networkId: item.networkId,
@@ -59,36 +96,55 @@ export default function CheckoutPage() {
                         dataAmount: item.dataAmount
                     }),
                 });
-                
-                const resultData = await response.json();
+
+                let resultData: { error?: string; code?: string } = {};
+                try {
+                    resultData = await response.json();
+                } catch {
+                    resultData = { error: `Purchase failed (HTTP ${response.status})` };
+                }
 
                 if (!response.ok) {
-                    throw new Error(resultData.error || `Purchase failed with status ${response.status}`);
+                    results.push({
+                        item,
+                        success: false,
+                        message:
+                            resultData.error ||
+                            `Purchase failed with status ${response.status}`,
+                        code: resultData.code,
+                    });
+                    continue;
                 }
                 
                 results.push({ item, success: true, message: 'Purchase successful!' });
+                runningBalance -= item.price;
                 
                 removeFromCart(item.cartId, false); // Don't show toast for each item
 
-            } catch (error: any) {
-                results.push({ item, success: false, message: error.message || 'An unknown error occurred.' });
+            } catch (error: unknown) {
+                const msg = error instanceof Error ? error.message : 'An unknown error occurred.';
+                results.push({ item, success: false, message: msg });
             }
+            }
+        } finally {
+            setPurchaseResults(results);
+            setIsProcessing(false);
+            payLockRef.current = false;
         }
-        
-        setPurchaseResults(results);
-        setIsProcessing(false);
 
         if(refreshUser) await refreshUser();
 
         const successfulPurchases = results.filter(r => r.success);
         const failedPurchases = results.filter(r => !r.success);
+        const has409 = failedPurchases.some(
+            (r) => r.code === 'ORDER_IN_PROGRESS' || r.message.includes('already in progress')
+        );
 
         if (failedPurchases.length === 0 && successfulPurchases.length > 0) {
             toast({
                 title: "All Purchases Successful!",
                 description: "Your data bundles have been sent.",
             });
-            // Don't redirect immediately, show the summary first.
         } else if (successfulPurchases.length > 0) {
             toast({
                 title: "Some Purchases Completed",
@@ -96,11 +152,20 @@ export default function CheckoutPage() {
                 variant: "default"
             });
         } else if (failedPurchases.length > 0) {
-             toast({
-                title: "All Purchases Failed",
-                description: "Could not purchase any bundles. Please check errors below.",
-                variant: "destructive"
-            });
+             if (has409) {
+                toast({
+                    title: "Order already in progress (409)",
+                    description:
+                        "The provider reports a duplicate or conflicting transaction for this number and bundle. Wait a few minutes, then check My Orders — or remove duplicate cart lines.",
+                    variant: "default",
+                });
+             } else {
+                toast({
+                    title: "Purchase could not complete",
+                    description: "See the details below each line item.",
+                    variant: "destructive"
+                });
+             }
         }
     }
 

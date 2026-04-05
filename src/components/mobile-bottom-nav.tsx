@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, ShoppingBag, Package, User } from "lucide-react";
+import { Home, ShoppingBag, Package, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCart } from "@/hooks/use-cart";
 import { Badge } from "./ui/badge";
@@ -11,7 +11,7 @@ const navLinks = [
     { href: "/", label: "Home", icon: Home },
     { href: "/cart", label: "Cart", icon: ShoppingBag },
     { href: "/orders", label: "Orders", icon: Package },
-    { href: "/profile", label: "Profile", icon: User },
+    { href: "/wallet", label: "Wallet", icon: Wallet },
 ];
 
 export function MobileBottomNav() {

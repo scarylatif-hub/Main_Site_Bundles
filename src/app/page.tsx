@@ -2,27 +2,24 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { usePaystackPayment } from 'react-paystack';
 import { PhoneInputForm } from '@/components/phone-input-form';
 import type { NetworkName, Package } from '@/lib/definitions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Wallet, ShoppingCart, Info, Zap, Shield, Smartphone } from 'lucide-react';
+import { ShoppingCart, Info, Zap, Shield, Smartphone } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/context/auth-context';
 import { useCart } from '@/hooks/use-cart';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from '@/hooks/use-toast';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { supabase } from '@/lib/supabase/client';
 import { validatePhoneNumber } from '@/lib/networks';
+import { WalletDepositCard } from '@/components/wallet-deposit-card';
 
 export default function Home() {
-  const { user, userProfile, refreshUser } = useAuth();
+  const { user } = useAuth();
   const { addToCart } = useCart();
   const { toast } = useToast();
   
@@ -31,62 +28,6 @@ export default function Home() {
   const [selectedNetwork, setSelectedNetwork] = useState<NetworkName | null>(null);
   const [allPackages, setAllPackages] = useState<Package[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [depositAmount, setDepositAmount] = useState('');
-
-  const paystackPublicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || "";
-
-  const handleDepositSuccess = async (reference: any) => {
-    if (!user) return;
-    const amount = parseFloat(depositAmount);
-
-    const { error } = await supabase.rpc('add_to_wallet_and_log_transaction', {
-        p_user_id: user.id,
-        p_amount: amount,
-        p_transaction_type: 'deposit',
-        p_status: 'success',
-        p_transaction_code: reference.reference,
-        p_description: `Paystack Deposit: ${reference.reference}`
-    });
-
-    if (error) {
-        toast({ title: 'Error', description: 'Failed to update wallet balance.', variant: 'destructive'});
-    } else {
-        toast({ title: "Deposit Successful!", description: `GHS ${amount.toFixed(2)} has been added to your wallet.` });
-        if(refreshUser) refreshUser();
-        setDepositAmount('');
-    }
-  };
-
-  const paystackConfig = {
-      reference: `TXN-${Date.now()}`,
-      email: user?.email || '',
-      amount: Math.round(parseFloat(depositAmount || '0') * 100),
-      publicKey: paystackPublicKey,
-      currency: 'GHS' as const,
-  };
-  const initializePayment = usePaystackPayment(paystackConfig);
-
-  const handleProceedToPayment = () => {
-      const amount = parseFloat(depositAmount);
-      if (!user?.email) {
-          toast({ title: 'Error', description: 'User email is not available.', variant: 'destructive'});
-          return;
-      }
-      if (isNaN(amount) || amount < 1) {
-          toast({ title: 'Invalid Amount', description: 'Please enter an amount of at least GHS 1.', variant: 'destructive'});
-          return;
-      }
-      if (!paystackPublicKey) {
-          toast({ title: 'Configuration Error', description: 'Payment gateway is not configured.', variant: 'destructive'});
-          return;
-      }
-      initializePayment({
-        ...paystackConfig,
-        amount: Math.round(amount * 100),
-        onSuccess: handleDepositSuccess,
-        onClose: () => {},
-      });
-  };
 
   useEffect(() => {
     const fetchPackages = async () => {
@@ -150,21 +91,8 @@ export default function Home() {
       </motion.div>
 
       {user && (
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-8" id="deposit">
-          <Card>
-            <CardHeader>
-              <CardTitle>Wallet Balance: GHS {userProfile?.wallet_balance?.toFixed(2) || '0.00'}</CardTitle>
-              <CardDescription>Top up your wallet via Paystack</CardDescription>
-            </CardHeader>
-            <CardContent className="flex gap-4">
-              <div className="flex-1">
-                <Input type="number" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} placeholder="Amount (GHS)" min="1" />
-              </div>
-              <Button onClick={handleProceedToPayment} disabled={!user?.email || parseFloat(depositAmount) < 1}>
-                Deposit Funds
-              </Button>
-            </CardContent>
-          </Card>
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
+          <WalletDepositCard id="deposit" />
         </motion.div>
       )}
 

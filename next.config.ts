@@ -1,7 +1,16 @@
 import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  async redirects() {
+    return [
+      { source: "/admin", destination: "/myadminportal/dashboard", permanent: false },
+      {
+        source: "/admin/:path*",
+        destination: "/myadminportal/:path*",
+        permanent: false,
+      },
+    ];
+  },
   typescript: {
     ignoreBuildErrors: true,
   },

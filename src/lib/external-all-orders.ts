@@ -1,0 +1,308 @@
+import {
+  cheapBundlesAllOrdersRequestUrl,
+  getCheapBundlesApiKey,
+} from "@/lib/cheap-bundles-config";
+import { readFetchJson } from "@/lib/fetch-json";
+import { apiNetworkIdToDisplay } from "@/lib/network-id-map";
+import { getRetailPriceGhs } from "@/lib/retail-prices";
+import { NETWORKS, normalizePhoneNumber } from "@/lib/networks";
+
+export type AdminOrderRow = {
+  id: string;
+  /** Canonical reference (DB); used for overrides / webhooks */
+  reference: string | null;
+  /** Provider/API order id for admin display */
+  provider_order_id: string | null;
+  transaction_code: string | null;
+  user_id: string;
+  created_at: string;
+  recipient_msisdn: string | null;
+  network_id: number | null;
+  /** When API returns a network name string instead of id */
+  network_label: string | null;
+  bundle_amount: string | null;
+  status: string;
+  /** Signed amount as stored in ledger; display uses Math.abs */
+  amount: number;
+  customerEmail: string;
+  customerName: string;
+};
+
+function pick<T extends Record<string, unknown>>(o: T, keys: string[]): unknown {
+  for (const k of keys) {
+    if (o[k] !== undefined && o[k] !== null && o[k] !== "") return o[k];
+  }
+  return undefined;
+}
+
+function parseNum(v: unknown): number | null {
+  if (v === undefined || v === null) return null;
+  const n = typeof v === "number" ? v : parseFloat(String(v).replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizePhone(p: string | null | undefined): string | null {
+  if (!p) return null;
+  const n = normalizePhoneNumber(String(p).trim());
+  return n.length >= 10 ? n : null;
+}
+
+/** Resolve display network id from API label (MTN, Telecel, AirtelTigo / AT-iShare, etc.) */
+function networkIdFromLabel(name: string | null | undefined): number | null {
+  if (!name) return null;
+  const n = name.trim().toLowerCase().replace(/\s+/g, " ");
+  if (n.includes("mtn")) return 1;
+  if (n.includes("telecel")) return 2;
+  if (
+    n.includes("airtel") ||
+    n.includes("tigo") ||
+    n.includes("ishare") ||
+    n.includes("at-i") ||
+    n === "at"
+  ) {
+    return 3;
+  }
+  const found = NETWORKS.find((x) => x.name.toLowerCase() === n);
+  return found ? found.id : null;
+}
+
+function parseGbFromBundleLabel(bundle: string | null): number | null {
+  if (!bundle) return null;
+  const m = String(bundle).match(/(\d+(?:\.\d+)?)/);
+  if (!m) return null;
+  const g = parseFloat(m[1]);
+  return Number.isFinite(g) && g > 0 ? g : null;
+}
+
+/** Pull order rows from common provider JSON envelopes. */
+function extractOrdersArray(data: unknown): unknown[] | null {
+  if (Array.isArray(data)) return data;
+  if (!data || typeof data !== "object") return null;
+  const o = data as Record<string, unknown>;
+  const keys = [
+    "orders",
+    "data",
+    "results",
+    "items",
+    "records",
+    "list",
+    "payload",
+    "content",
+  ];
+  for (const k of keys) {
+    const v = o[k];
+    if (Array.isArray(v)) return v;
+  }
+  return null;
+}
+
+/**
+ * Fetch raw order objects from the provider `all-orders` endpoint (GET, server-side key).
+ * Uses `cheapBundlesAllOrdersRequestUrl()` so you can widen results via
+ * `CHEAP_BUNDLES_ALL_ORDERS_QUERY` (e.g. `limit=10000`) if the API paginates.
+ */
+export async function fetchExternalAllOrdersRaw(): Promise<unknown[]> {
+  const apiKey = getCheapBundlesApiKey();
+  const url = cheapBundlesAllOrdersRequestUrl();
+  if (!apiKey || !url) {
+    console.warn("external-all-orders: missing CHEAP_BUNDLES / EXTERNAL API config");
+    return [];
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "X-API-KEY": apiKey,
+      },
+      cache: "no-store",
+    });
+
+    const { ok, status, data } = await readFetchJson(res);
+
+    if (!ok) {
+      console.error("external-all-orders HTTP", status, data);
+      return [];
+    }
+
+    const arr = extractOrdersArray(data);
+    if (arr) return arr;
+    console.warn("external-all-orders: unexpected shape", typeof data);
+    return [];
+  } catch (e) {
+    console.error("external-all-orders fetch error", e);
+    return [];
+  }
+}
+
+export function normalizeExternalOrder(
+  raw: unknown,
+  phoneToProfile: Map<string, { email: string; name: string; id: string }>
+): AdminOrderRow | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+
+  const provider_order_id_raw = pick(o, ["id", "order_id", "orderId", "idx"]);
+  const provider_order_id =
+    provider_order_id_raw != null ? String(provider_order_id_raw) : null;
+
+  const idVal = pick(o, ["id", "order_id", "orderId", "idx", "transaction_id", "transactionId"]);
+  const id =
+    idVal != null
+      ? String(idVal)
+      : `ext-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+  const codeVal = pick(o, [
+    "transaction_id",
+    "transactionId",
+    "transaction_code",
+    "transactionCode",
+    "reference",
+    "ref",
+    "order_reference",
+  ]);
+  const transaction_code = codeVal != null ? String(codeVal) : null;
+
+  const dateVal = pick(o, [
+    "createdAt",
+    "created_at",
+    "date",
+    "order_date",
+    "timestamp",
+  ]);
+  const created_at =
+    dateVal != null
+      ? (() => {
+          const d = new Date(String(dateVal));
+          return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+        })()
+      : new Date().toISOString();
+
+  const phoneVal = pick(o, [
+    "beneficiary_number",
+    "recipient_msisdn",
+    "recipientMsisdn",
+    "beneficiary",
+    "phone",
+    "msisdn",
+    "recipient_phone",
+    "recipientPhone",
+    "mobile",
+  ]);
+  const recipient_msisdn = phoneVal != null ? String(phoneVal).trim() : null;
+
+  const netVal = pick(o, ["network", "network_name", "networkName", "operator", "telco"]);
+  const network_label = netVal != null ? String(netVal).trim() : null;
+  const rawNet = parseNum(pick(o, ["network_id", "networkId"]));
+  let network_id: number | null = null;
+  if (rawNet != null && Number.isFinite(rawNet)) {
+    network_id = apiNetworkIdToDisplay(Math.trunc(rawNet));
+  } else {
+    network_id = networkIdFromLabel(network_label);
+  }
+
+  const volVal = pick(o, [
+    "bundle_amount",
+    "bundleAmount",
+    "volume",
+    "data_amount",
+    "dataAmount",
+    "size",
+    "package",
+    "plan",
+  ]);
+  const bundle_amount = volVal != null ? String(volVal) : null;
+
+  const sharedGb =
+    parseNum(pick(o, ["shared_bundle", "sharedBundle", "SharedBundle"])) ?? null;
+  const gbForRetail =
+    sharedGb != null && Number.isFinite(sharedGb) && sharedGb > 0
+      ? sharedGb
+      : parseGbFromBundleLabel(bundle_amount);
+
+  const statusVal = pick(o, ["status", "order_status", "state"]);
+  const status = statusVal != null ? String(statusVal) : "unknown";
+
+  let price =
+    parseNum(pick(o, ["price", "amount", "total", "cost", "charge", "customer_price"])) ?? 0;
+
+  const retail =
+    network_id != null && gbForRetail != null
+      ? getRetailPriceGhs(network_id, Math.trunc(gbForRetail))
+      : null;
+  if (retail != null) {
+    price = retail;
+  }
+
+  const np = normalizePhone(recipient_msisdn);
+  const prof = np ? phoneToProfile.get(np) : undefined;
+
+  return {
+    id,
+    reference: transaction_code,
+    provider_order_id,
+    transaction_code,
+    user_id: prof?.id ?? "",
+    created_at,
+    recipient_msisdn,
+    network_id,
+    network_label,
+    bundle_amount,
+    status,
+    amount: -Math.abs(price),
+    customerEmail: prof?.email ?? "—",
+    customerName: prof?.name ?? "",
+  };
+}
+
+export function transactionToAdminRow(
+  t: {
+    id: string;
+    user_id: string;
+    reference?: string | null;
+    transaction_code: string | null;
+    created_at: string;
+    recipient_msisdn: string | null;
+    network_id: number | null;
+    bundle_amount: string | null;
+    status: string;
+    amount: number;
+  },
+  emailByUserId: Map<string, { email: string; name: string }>
+): AdminOrderRow {
+  const c = emailByUserId.get(t.user_id);
+  const ref = t.reference ?? t.transaction_code;
+  return {
+    id: t.id,
+    reference: ref,
+    provider_order_id: null,
+    transaction_code: t.transaction_code,
+    user_id: t.user_id,
+    created_at: t.created_at,
+    recipient_msisdn: t.recipient_msisdn,
+    network_id: t.network_id,
+    network_label: null,
+    bundle_amount: t.bundle_amount,
+    status: t.status,
+    amount: t.amount,
+    customerEmail: c?.email ?? "—",
+    customerName: c?.name ?? "",
+  };
+}
+
+export function buildPhoneProfileMap(
+  profiles: { id: string; email: string | null; full_name: string | null; phone_number: string | null }[]
+): Map<string, { email: string; name: string; id: string }> {
+  const m = new Map<string, { email: string; name: string; id: string }>();
+  for (const p of profiles) {
+    const key = normalizePhone(p.phone_number);
+    if (!key) continue;
+    m.set(key, {
+      id: p.id,
+      email: p.email ?? "—",
+      name: p.full_name ?? "",
+    });
+  }
+  return m;
+}

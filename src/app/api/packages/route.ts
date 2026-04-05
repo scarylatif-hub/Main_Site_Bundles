@@ -1,49 +1,87 @@
 
 import { NextResponse, type NextRequest } from 'next/server';
+import { applyRetailPrice } from '@/lib/pricing';
+import {
+  cheapBundlesPackagesUrl,
+  getCheapBundlesApiKey,
+} from '@/lib/cheap-bundles-config';
+import { NETWORKS } from '@/lib/networks';
+import type { NetworkName } from '@/lib/definitions';
+import { apiNetworkIdToDisplay } from '@/lib/network-id-map';
+import { getRetailPriceGhs, buildFallbackPackagesList } from '@/lib/retail-prices';
 
 export const dynamic = 'force-dynamic';
 
-// Fallback packages data when external API is not configured
-const FALLBACK_PACKAGES = [
-  // MTN Packages
-  { id: 'mtn-1gb', network: { id: 1, name: 'MTN' }, dataAmount: '1GB', validity: '30 days', price: 4.57, sharedBundle: 1 },
-  { id: 'mtn-2gb', network: { id: 1, name: 'MTN' }, dataAmount: '2GB', validity: '30 days', price: 8.57, sharedBundle: 2 },
-  { id: 'mtn-5gb', network: { id: 1, name: 'MTN' }, dataAmount: '5GB', validity: '30 days', price: 22.86, sharedBundle: 5 },
-  { id: 'mtn-10gb', network: { id: 1, name: 'MTN' }, dataAmount: '10GB', validity: '30 days', price: 42.86, sharedBundle: 10 },
-  
-  // Telecel Packages
-  { id: 'tc-1gb', network: { id: 2, name: 'Telecel' }, dataAmount: '1GB', validity: '30 days', price: 4.29, sharedBundle: 1 },
-  { id: 'tc-5gb', network: { id: 2, name: 'Telecel' }, dataAmount: '5GB', validity: '30 days', price: 21.50, sharedBundle: 5 },
-  { id: 'tc-10gb', network: { id: 2, name: 'Telecel' }, dataAmount: '10GB', validity: '30 days', price: 40.00, sharedBundle: 10 },
-  
-  // AirtelTigo Packages
-  { id: 'at-1gb', network: { id: 3, name: 'AirtelTigo' }, dataAmount: '1GB', validity: '30 days', price: 4.50, sharedBundle: 1 },
-  { id: 'at-5gb', network: { id: 3, name: 'AirtelTigo' }, dataAmount: '5GB', validity: '30 days', price: 23.20, sharedBundle: 5 },
-  { id: 'at-10gb', network: { id: 3, name: 'AirtelTigo' }, dataAmount: '10GB', validity: '30 days', price: 45.00, sharedBundle: 10 },
-];
+function mapPackagesWithRetailPricing(raw: unknown[]): unknown[] {
+  return raw.map((pkg: any) => {
+    const wholesale =
+      typeof pkg.price === 'number'
+        ? pkg.price
+        : parseFloat(String(pkg.price ?? 0));
+    const rawNetId = Number(pkg.network?.id ?? pkg.network_id);
+    const displayNetId = Number.isFinite(rawNetId)
+      ? apiNetworkIdToDisplay(Math.trunc(rawNetId))
+      : 1;
+    const netFromId = NETWORKS.find((n) => n.id === displayNetId);
+    const networkName = (pkg.network?.name ?? netFromId?.name ?? 'MTN') as NetworkName;
+
+    const vol =
+      pkg.sharedBundle ??
+      pkg.shared_bundle ??
+      pkg.SharedBundle ??
+      pkg.sharedBundleId ??
+      pkg.volume;
+    const sharedBundle = Number(vol);
+    const dataAmount =
+      pkg.dataAmount ??
+      pkg.data_amount ??
+      (Number.isFinite(sharedBundle) && sharedBundle > 0
+        ? `${sharedBundle} GB`
+        : 'Bundle');
+    const validity = pkg.validity ?? pkg.validity_days ?? '30 days';
+
+    const tablePrice = getRetailPriceGhs(displayNetId, sharedBundle);
+    const retail =
+      tablePrice ??
+      applyRetailPrice(Number.isFinite(wholesale) ? wholesale : 0);
+
+    return {
+      ...pkg,
+      id:
+        pkg.id != null
+          ? String(pkg.id)
+          : `pkg-${displayNetId}-${sharedBundle}`,
+      network: { id: displayNetId, name: networkName },
+      dataAmount,
+      validity,
+      sharedBundle: Number.isFinite(sharedBundle) ? sharedBundle : 0,
+      wholesalePrice: wholesale,
+      price: retail,
+    };
+  });
+}
 
 export async function GET(request: NextRequest) {
-  const apiKey = process.env.CHEAP_BUNDLES_API_KEY;
-  const apiUrl = process.env.CHEAP_BUNDLES_API_URL;
+  const apiKey = getCheapBundlesApiKey();
+  const packagesUrl = cheapBundlesPackagesUrl('all-packages');
 
-  // If API is not configured, return fallback data
-  if (!apiKey || !apiUrl) {
-    console.warn('Cheap Bundles API not configured. Returning fallback packages.');
-    return NextResponse.json(FALLBACK_PACKAGES);
+  const fallback = buildFallbackPackagesList();
+
+  if (!apiKey || !packagesUrl) {
+    console.warn('Cheap Bundles API not configured. Returning catalog prices.');
+    return NextResponse.json(mapPackagesWithRetailPricing(fallback as unknown[]));
   }
 
   try {
-    const response = await fetch(
-      `${apiUrl}/api/external/packages/all-packages`,
-      {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-KEY': apiKey,
-        },
-        cache: 'no-store',
-      }
-    );
+    const response = await fetch(packagesUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'X-API-KEY': apiKey,
+      },
+      cache: 'no-store',
+    });
 
     if (!response.ok) {
       const errorBody = await response.text();
@@ -51,32 +89,27 @@ export async function GET(request: NextRequest) {
         `External API error: ${response.status} ${response.statusText}`,
         errorBody
       );
-      // Return fallback on API error
-      console.warn('External API failed. Returning fallback packages.');
-      return NextResponse.json(FALLBACK_PACKAGES);
+      console.warn('External API failed. Returning catalog prices.');
+      return NextResponse.json(mapPackagesWithRetailPricing(fallback as unknown[]));
     }
 
     const data = await response.json();
 
-    // The external API can return data in two shapes: { packages: [...] } or just [...]
     if (data && Array.isArray(data.packages)) {
-      return NextResponse.json(data.packages);
+      return NextResponse.json(mapPackagesWithRetailPricing(data.packages));
     }
 
     if (Array.isArray(data)) {
-      return NextResponse.json(data);
+      return NextResponse.json(mapPackagesWithRetailPricing(data));
     }
 
     console.error('Unexpected response structure from external API:', data);
-    // Return fallback on unexpected structure
-    return NextResponse.json(FALLBACK_PACKAGES);
+    return NextResponse.json(mapPackagesWithRetailPricing(fallback as unknown[]));
   } catch (error: unknown) {
     const errorMessage =
       error instanceof Error ? error.message : 'Unknown error occurred';
     console.error('Error fetching from /api/packages:', error);
-    
-    // Return fallback on any error
-    console.warn('Error during package fetch. Returning fallback packages.');
-    return NextResponse.json(FALLBACK_PACKAGES);
+    console.warn('Error during package fetch. Returning catalog prices.');
+    return NextResponse.json(mapPackagesWithRetailPricing(fallback as unknown[]));
   }
 }

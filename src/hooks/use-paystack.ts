@@ -77,6 +77,7 @@ export function usePaystack({
         const initResponse = await fetch('/api/paystack/initialize', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({
             amount: config.amount,
             type: action,
@@ -88,45 +89,66 @@ export function usePaystack({
           throw new Error('Failed to initialize payment');
         }
 
-        const { reference, accessCode } = await initResponse.json();
+        const initJson = await initResponse.json();
+        const reference = initJson.reference as string;
+        const chargeGhs = Number(
+          initJson.chargeAmountGhs ?? config.amount
+        );
 
-        // Show Paystack payment modal using the public key
-        (window as any).PaystackPop.setup({
+        const PS = (window as any).PaystackPop;
+        const finishVerify = () => {
+          verifyPaymentWithPolling(reference)
+            .then(() => {
+              toast({
+                title: 'Success',
+                description: 'Wallet credited successfully.',
+              });
+              config.onSuccess?.();
+              onSuccess?.();
+            })
+            .catch((error) => {
+              toast({
+                title: 'Confirmation pending',
+                description:
+                  error instanceof Error
+                    ? error.message
+                    : 'We could not confirm immediately; your webhook may still credit you.',
+                variant: 'destructive',
+              });
+              console.error('Verification error:', error);
+            })
+            .finally(() => {
+              setIsInitializing(false);
+            });
+        };
+
+        // Inline JS v1: setup() returns a handle with openIframe(); use `callback` (not onSuccess).
+        let popup = PS.setup({
           key: publicKey,
           email: config.email,
-          amount: config.amount * 100, // Convert to kobo/cents
+          amount: Math.round(chargeGhs * 100),
           ref: reference,
           currency: 'GHS',
+          callback: () => {
+            finishVerify();
+          },
           onClose: () => {
             config.onClose?.();
             setIsInitializing(false);
           },
-          onSuccess: (response: any) => {
-            // Verify the payment with our backend
-            verifyPayment(reference)
-              .then(() => {
-                toast({
-                  title: 'Success',
-                  description: 'Payment completed successfully',
-                });
-                config.onSuccess?.();
-                onSuccess?.();
-              })
-              .catch((error) => {
-                toast({
-                  title: 'Error',
-                  description: 'Payment verification failed',
-                  variant: 'destructive',
-                });
-                console.error('Verification error:', error);
-              })
-              .finally(() => {
-                setIsInitializing(false);
-              });
-          },
         });
 
-        (window as any).PaystackPop.pay();
+        if (popup && typeof (popup as Promise<unknown>).then === 'function') {
+          popup = await (popup as Promise<{ openIframe?: () => void }>);
+        }
+
+        if (popup && typeof popup.openIframe === 'function') {
+          popup.openIframe();
+        } else if (PS && typeof PS.openIframe === 'function') {
+          PS.openIframe();
+        } else {
+          throw new Error('Paystack Inline JS is outdated or blocked. Try another browser or disable extensions.');
+        }
       } catch (error) {
         console.error('Payment initialization error:', error);
         toast({
@@ -148,22 +170,42 @@ export function usePaystack({
 }
 
 /**
- * Verify payment on backend
+ * Poll verify+credit every 2s (webhook may also credit; idempotent).
  */
-async function verifyPayment(reference: string): Promise<void> {
-  const response = await fetch(`/api/paystack/verify?reference=${reference}`);
+async function verifyPaymentWithPolling(reference: string): Promise<void> {
+  const maxAttempts = 45;
 
-  if (!response.ok) {
-    throw new Error('Payment verification failed');
+  for (let i = 0; i < maxAttempts; i++) {
+    const response = await fetch(
+      `/api/paystack/verify?reference=${encodeURIComponent(reference)}`,
+      { credentials: 'include' }
+    );
+
+    const data = await response.json();
+
+    if (response.status === 403) {
+      throw new Error('Please stay logged in while we confirm your payment.');
+    }
+
+    if (!response.ok && response.status !== 200) {
+      await new Promise((r) => setTimeout(r, 2000));
+      continue;
+    }
+
+    if (data.credited === true || data.reason === 'already_processed') {
+      return;
+    }
+
+    if (data.reason === 'rpc_error') {
+      throw new Error('Payment verified but wallet update failed. Contact support with your reference.');
+    }
+
+    await new Promise((r) => setTimeout(r, 2000));
   }
 
-  const data = await response.json();
-
-  if (data.status !== 'success') {
-    throw new Error('Payment was not successful');
-  }
-
-  return;
+  throw new Error(
+    'Still confirming with Paystack. If you were charged, wait a moment and refresh your wallet.'
+  );
 }
 
 // Extend window type for Paystack

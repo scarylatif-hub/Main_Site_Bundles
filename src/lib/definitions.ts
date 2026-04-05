@@ -32,6 +32,8 @@ export interface CartItem {
 export type Transaction = {
     id: string;
     user_id: string;
+    /** Canonical id shared with provider / Paystack (after migration 004). */
+    reference?: string | null;
     transaction_code: string | null;
     transaction_type: string;
     recipient_msisdn: string | null;

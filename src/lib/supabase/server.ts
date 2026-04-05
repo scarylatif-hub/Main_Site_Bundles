@@ -1,27 +1,27 @@
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import { cookies } from "next/headers";
 
-import { createServerClient, type CookieOptions } from '@supabase/ssr'
-import { cookies } from 'next/headers'
+export async function createClient() {
+  const cookieStore = await cookies();
 
-export const createClient = (cookieStore: ReturnType<typeof cookies>) => {
   return createServerClient(
-    "https://ieqrdlbdqilzwibtyyqy.supabase.co",
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImllcXJkbGJkcWlsendpYnR5eXF5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY3MzIwMTUsImV4cCI6MjA4MjMwODAxNX0.vKWlA8t4-vllguDrd7AN7ipYDFGile025bnZ4HSSer8",
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value
+        getAll() {
+          return cookieStore.getAll();
         },
-        set(name: string, value: string, options: CookieOptions) {
+        setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
           try {
-            cookieStore.set({ name, value, ...options })
-          } catch (error) {}
-        },
-        remove(name: string, options: CookieOptions) {
-          try {
-            cookieStore.set({ name, value: '', ...options })
-          } catch (error) {}
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
+          } catch {
+            // Server Component or non-mutable context — middleware refreshes session.
+          }
         },
       },
     }
-  )
+  );
 }

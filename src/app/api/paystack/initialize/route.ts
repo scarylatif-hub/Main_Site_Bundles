@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 import { generatePaystackReference, toPaystackAmount } from '@/lib/paystack-config';
+import { chargeGhsForWalletCredit } from '@/lib/wallet-deposit-fee';
 
 export const dynamic = 'force-dynamic';
+
+function normalizePaystackType(
+  type: string
+): { refKind: 'wallet' | 'purchase'; metadataType: string } {
+  if (type === 'deposit' || type === 'wallet_deposit') {
+    return { refKind: 'wallet', metadataType: 'deposit' };
+  }
+  return { refKind: 'purchase', metadataType: 'purchase' };
+}
 
 /**
  * POST /api/paystack/initialize
@@ -14,26 +23,33 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(request: NextRequest) {
   try {
-    const cookieStore = cookies();
-    const supabase = createClient(cookieStore);
+    const supabase = await createClient();
 
     // Get authenticated user
     const {
-      data: { session },
-    } = await supabase.auth.getSession();
+      data: { user },
+    } = await supabase.auth.getUser();
 
-    if (!session) {
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const { amount, type, description } = await request.json();
 
-    if (!amount || !type || (type !== 'deposit' && type !== 'purchase')) {
+    const allowed =
+      type === 'deposit' ||
+      type === 'purchase' ||
+      type === 'wallet_deposit' ||
+      type === 'cart_purchase';
+
+    if (!amount || !type || !allowed) {
       return NextResponse.json(
         { error: 'Missing or invalid required fields' },
         { status: 400 }
       );
     }
+
+    const { refKind, metadataType } = normalizePaystackType(type);
 
     const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
 
@@ -45,20 +61,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const reference = generatePaystackReference(session.user.id, type as 'wallet' | 'purchase');
-    const amountInKobo = toPaystackAmount(amount);
+    const reference = generatePaystackReference(user.id, refKind);
+    const baseGhs = Number(amount);
+    const isDeposit = metadataType === 'deposit';
+    const chargeGhs = isDeposit ? chargeGhsForWalletCredit(baseGhs) : baseGhs;
+    const amountInKobo = toPaystackAmount(chargeGhs);
 
     // Prepare Paystack request
     const paystackUrl = 'https://api.paystack.co/transaction/initialize';
     const paystackData = {
-      email: session.user.email,
+      email: user.email,
       amount: amountInKobo,
       reference,
       metadata: {
-        userId: session.user.id,
-        type,
+        userId: user.id,
+        type: metadataType,
         description,
         timestamp: new Date().toISOString(),
+        ...(isDeposit
+          ? {
+              creditAmountGhs: String(baseGhs),
+              chargeAmountGhs: String(chargeGhs),
+            }
+          : {}),
       },
     };
 
@@ -96,63 +121,11 @@ export async function POST(request: NextRequest) {
       authorizationUrl: result.data.authorization_url,
       accessCode: result.data.access_code,
       reference,
+      creditAmountGhs: baseGhs,
+      chargeAmountGhs: chargeGhs,
     });
   } catch (error) {
     console.error('Error in POST /api/paystack/initialize:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
-  }
-}
-
-/**
- * GET /api/paystack/verify
- * Verify a Paystack payment after the user returns from the gateway
- */
-export async function GET(request: NextRequest) {
-  try {
-    const reference = request.nextUrl.searchParams.get('reference');
-
-    if (!reference) {
-      return NextResponse.json(
-        { error: 'Reference parameter is required' },
-        { status: 400 }
-      );
-    }
-
-    const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
-
-    if (!paystackSecretKey) {
-      console.error('Paystack secret key not configured');
-      return NextResponse.json(
-        { error: 'Payment service not configured' },
-        { status: 500 }
-      );
-    }
-
-    // Verify with Paystack
-    const verifyUrl = `https://api.paystack.co/transaction/verify/${reference}`;
-    const response = await fetch(verifyUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${paystackSecretKey}`,
-      },
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.error('Paystack verification error:', errorData);
-      return NextResponse.json(
-        { error: 'Payment verification failed' },
-        { status: response.status }
-      );
-    }
-
-    const result = await response.json();
-    return NextResponse.json(result.data);
-  } catch (error) {
-    console.error('Error in GET /api/paystack/verify:', error);
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

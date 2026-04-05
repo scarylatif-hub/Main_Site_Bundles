@@ -61,7 +61,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       
       if (data) {
-        setUserProfile(data);
+        setUserProfile({
+          ...data,
+          wallet_balance: Number(data.wallet_balance),
+          is_admin: Boolean(data.is_admin),
+        } as Profile);
       }
     } catch (error: any) {
       console.error("Error fetching user profile:", error.message || error);

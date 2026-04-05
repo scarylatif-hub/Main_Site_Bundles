@@ -4,15 +4,16 @@ import { PageHeader } from "@/components/page-header";
 import { OrdersTable } from "@/components/orders-table";
 import { Card, CardContent } from "@/components/ui/card";
 import { useAuth } from "@/context/auth-context";
-import { supabase } from "@/lib/supabase/client";
 import { useEffect, useState, useCallback } from "react";
 import type { Transaction } from "@/lib/definitions";
 import { Skeleton } from "@/components/ui/skeleton";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 
 export default function OrdersPage() {
     const { user, loading: authLoading } = useAuth();
+    const { toast } = useToast();
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [loading, setLoading] = useState(true);
 
@@ -23,22 +24,19 @@ export default function OrdersPage() {
         }
         setLoading(true);
         try {
-            const { data, error } = await supabase
-                .from('transactions')
-                .select('*')
-                .eq('user_id', user.id)
-                .eq('transaction_type', 'purchase')
-                .order('created_at', { ascending: false });
-
-            if (error) {
-                console.error("Error fetching transactions:", error);
-            } else {
-                setTransactions(data || []);
+            const res = await fetch('/api/orders/me', { credentials: 'include' });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                console.error("Error fetching orders:", err);
+                setTransactions([]);
+                return;
             }
+            const data = await res.json();
+            setTransactions(Array.isArray(data) ? data : []);
         } finally {
             setLoading(false);
         }
-    }, [user]);
+    }, [user, toast]);
 
     useEffect(() => {
         if (!authLoading) {

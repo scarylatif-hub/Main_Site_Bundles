@@ -4,14 +4,8 @@ import Link from "next/link";
 import { Logo } from "@/components/logo";
 import { CartIcon } from "@/components/cart-icon";
 import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
-import { LogOut, Menu, User, Wallet } from "lucide-react";
+import { LogOut, User, Wallet } from "lucide-react";
+import { NotificationBell } from "@/components/notification-bell";
 import { useAuth } from "@/context/auth-context";
 import {
   DropdownMenu,
@@ -23,8 +17,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { AuthComponents } from "./auth-components";
-import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase/client";
+import { isAdminEmail } from "@/lib/admin-config";
 
 const navLinks = [
   { href: "/", label: "Buy Data" },
@@ -52,11 +45,11 @@ function UserNav() {
     );
   }
 
-  const displayName = user.user_metadata.full_name || "User";
+  const displayName = user.user_metadata?.full_name || "User";
   const userInitials =
     displayName
       ?.split(" ")
-      .map((n) => n[0])
+      .map((n: string) => n[0])
       .join("") || user.email?.[0].toUpperCase() || "U";
 
   return (
@@ -79,11 +72,11 @@ function UserNav() {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {user.email === 'stevekobbi20@gmail.com' && (
+        {isAdminEmail(user.email) && (
           <DropdownMenuItem asChild>
-            <Link href="/admin/dashboard">
+            <Link href="/myadminportal/dashboard">
               <User className="mr-2 h-4 w-4" />
-              <span>Dashboard</span>
+              <span>Admin</span>
             </Link>
           </DropdownMenuItem>
         )}
@@ -127,7 +120,6 @@ function WalletBalance() {
 }
 
 export function Header() {
-  const { user } = useAuth();
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="container flex h-16 max-w-6xl items-center">
@@ -135,49 +127,12 @@ export function Header() {
           <Logo />
         </div>
 
-        <div className="md:hidden flex-none">
-          <Sheet>
-            <SheetTrigger asChild>
-              <Button variant="ghost" size="icon">
-                <Menu className="h-6 w-6" />
-                <span className="sr-only">Toggle Menu</span>
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="w-[300px] sm:w-[400px]">
-              <SheetHeader>
-                <SheetTitle className="sr-only">Menu</SheetTitle>
-              </SheetHeader>
-              <nav className="flex flex-col gap-4 mt-8">
-                <div className="mb-4">
-                  <Logo />
-                </div>
-                {navLinks.map((link) => (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    className="text-lg font-medium text-foreground/70 hover:text-foreground"
-                  >
-                    {link.label}
-                  </Link>
-                ))}
-                {user?.email === 'stevekobbi20@gmail.com' && (
-                    <Link
-                        href="/admin/dashboard"
-                        className="text-lg font-medium text-foreground/70 hover:text-foreground"
-                    >
-                        Dashboard
-                    </Link>
-                )}
-              </nav>
-            </SheetContent>
-          </Sheet>
-        </div>
-
-        <div className="flex flex-1 items-center justify-center md:justify-end md:space-x-2">
-          <div className="md:hidden">
+        <div className="flex flex-1 items-center justify-between md:justify-end gap-2 min-w-0">
+          <div className="md:hidden shrink-0 min-w-0">
             <Logo />
           </div>
-          <nav className="hidden md:flex items-center gap-6 text-sm">
+          {/* Mobile: no top nav links — use bottom nav + profile menu */}
+          <nav className="hidden md:flex items-center gap-6 text-sm mr-6">
             {navLinks.map((link) => (
               <Link
                 key={link.href}
@@ -187,17 +142,10 @@ export function Header() {
                 {link.label}
               </Link>
             ))}
-             {user?.email === 'stevekobbi20@gmail.com' && (
-              <Link
-                href="/admin/dashboard"
-                className="font-medium text-foreground/70 transition-colors hover:text-foreground"
-              >
-                Dashboard
-              </Link>
-            )}
           </nav>
-          <div className="flex items-center gap-4 ml-auto md:ml-0 flex-none">
+          <div className="flex items-center gap-2 sm:gap-4 ml-auto md:ml-0 flex-none shrink-0">
             <AuthComponents>
+              <NotificationBell />
               <WalletBalance />
               <CartIcon />
             </AuthComponents>
