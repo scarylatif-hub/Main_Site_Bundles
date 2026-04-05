@@ -24,11 +24,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import { sanitizeSearchParamsString } from "@/lib/sanitize-auth-search-params";
 
 
 const passwordValidation = new RegExp(
@@ -71,6 +72,19 @@ export default function SignupPage() {
       terms: false,
     },
   });
+
+  useEffect(() => {
+    const raw =
+      typeof window !== "undefined"
+        ? window.location.search.replace(/^\?/, "")
+        : "";
+    const { cleaned, changed } = sanitizeSearchParamsString(raw);
+    if (changed) {
+      router.replace(cleaned ? `/signup?${cleaned}` : "/signup", {
+        scroll: false,
+      });
+    }
+  }, [router]);
 
   async function onSubmit(data: z.infer<typeof FormSchema>) {
     setLoading(true);
@@ -141,7 +155,11 @@ export default function SignupPage() {
         </CardHeader>
         <CardContent>
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <form
+              method="post"
+              onSubmit={form.handleSubmit(onSubmit)}
+              className="space-y-4"
+            >
               <FormField
                 control={form.control}
                 name="fullName"

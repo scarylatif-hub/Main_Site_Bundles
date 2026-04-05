@@ -1,4 +1,3 @@
-
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -24,32 +23,36 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import Link from "next/link";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import { sanitizeSearchParamsString } from "@/lib/sanitize-auth-search-params";
 
 const FormSchema = z.object({
   email: z.string().email({ message: "Please enter a valid email address." }),
-  password: z
-    .string()
-    .min(1, { message: "Password is required." }),
+  password: z.string().min(1, { message: "Password is required." }),
 });
 
 function LoginForm() {
   const { toast } = useToast();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const form = useForm<z.infer<typeof FormSchema>>({
     resolver: zodResolver(FormSchema),
-    defaultValues: {
-      email: "",
-      password: "",
-    },
+    defaultValues: { email: "", password: "" },
   });
+
+  useEffect(() => {
+    const raw = searchParams.toString();
+    const { cleaned, changed } = sanitizeSearchParamsString(raw);
+    if (changed) {
+      const next = cleaned ? `/login?${cleaned}` : "/login";
+      window.history.replaceState(null, "", next);
+    }
+  }, [searchParams]);
 
   function safeNextPath(): string {
     const raw = searchParams.get("next");
@@ -62,21 +65,56 @@ function LoginForm() {
   async function onSubmit(data: z.infer<typeof FormSchema>) {
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: data.email,
-        password: data.password,
-      });
-
-      if (error) {
-        throw new Error(error.message || "Sign in failed");
+      let res: Response;
+      try {
+        res = await fetch("/api/auth/signin", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: data.email,
+            password: data.password,
+          }),
+        });
+      } catch {
+        throw new Error(
+          "Could not reach the server. Check your connection and try again."
+        );
       }
 
-      toast({
-        title: "Login Successful",
-        description: "Welcome back!",
+      const body = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        session?: { access_token?: string; refresh_token?: string };
+      };
+
+      if (!res.ok) {
+        throw new Error(
+          typeof body.error === "string" && body.error
+            ? body.error
+            : "Invalid email or password."
+        );
+      }
+
+      const session = body.session;
+      if (!session?.access_token || !session?.refresh_token) {
+        throw new Error("Sign in succeeded but no session was returned.");
+      }
+
+      const { error: sessionError } = await supabase.auth.setSession({
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
       });
-      router.push(safeNextPath());
-      router.refresh();
+
+      if (sessionError) {
+        throw new Error(
+          sessionError.message || "Could not establish your session."
+        );
+      }
+
+      // Hard navigation — fully unloads the login page immediately
+      // and loads the destination with the fresh session already in cookies.
+      // This avoids the flicker caused by router.push + router.refresh
+      // where the login page stays visible while the server re-renders.
+      window.location.href = safeNextPath();
     } catch (error: unknown) {
       console.error("Login Error:", error);
       toast({
@@ -87,8 +125,7 @@ function LoginForm() {
             ? error.message
             : "Invalid email or password. Please try again.",
       });
-    } finally {
-      setLoading(false);
+      setLoading(false); // only reset on error — on success we're navigating away
     }
   }
 
@@ -98,13 +135,15 @@ function LoginForm() {
         <CardTitle className="text-3xl font-bold tracking-tight">
           Welcome Back
         </CardTitle>
-        <CardDescription>
-          Login to your account to continue
-        </CardDescription>
+        <CardDescription>Login to your account to continue</CardDescription>
       </CardHeader>
       <CardContent>
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <form
+            method="post"
+            onSubmit={form.handleSubmit(onSubmit)}
+            className="space-y-4"
+          >
             <FormField
               control={form.control}
               name="email"
@@ -115,6 +154,7 @@ function LoginForm() {
                     <Input
                       placeholder="your.email@example.com"
                       {...field}
+                      autoComplete="username"
                       autoFocus
                     />
                   </FormControl>
@@ -141,6 +181,7 @@ function LoginForm() {
                       <Input
                         type={showPassword ? "text" : "password"}
                         placeholder="Enter your password"
+                        autoComplete="current-password"
                         {...field}
                       />
                     </FormControl>
@@ -163,7 +204,7 @@ function LoginForm() {
               )}
             />
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Logging in..." : "Login"}
+              {loading ? "Logging in…" : "Login"}
             </Button>
           </form>
         </Form>
