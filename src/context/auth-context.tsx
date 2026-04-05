@@ -11,8 +11,6 @@ import {
 } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { type User, type Session } from "@supabase/supabase-js";
-import { useRouter } from "next/navigation";
-
 export type Profile = {
   id: string;
   full_name: string;
@@ -39,7 +37,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [userProfile, setUserProfile] = useState<Profile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
-  const router = useRouter();
 
   const fetchUserProfile = useCallback(async (user: User | null) => {
     if (!user) {
@@ -115,13 +112,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     setLoading(true);
     try {
-      await supabase.auth.signOut();
-      router.push("/login");
-      router.refresh();
+      try {
+        await fetch("/api/auth/signout", {
+          method: "POST",
+          credentials: "same-origin",
+        });
+      } catch {
+        await supabase.auth.signOut();
+      }
+      window.location.assign("/login");
     } catch (error) {
       console.error("Error signing out:", error);
-    } finally {
-        setLoading(false);
+      setLoading(false);
     }
   };
 

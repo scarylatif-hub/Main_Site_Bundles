@@ -1,13 +1,19 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { NextRequest, NextResponse } from "next/server";
+import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
 
+/**
+ * Sign in on the server and write Supabase auth cookies onto this response.
+ * Avoids client-side setSession(), which races with AuthProvider and triggers
+ * navigator.locks errors ("another request stole it").
+ */
 export async function POST(request: NextRequest) {
   try {
     const { email, password } = await request.json();
 
     if (!email || !password) {
       return NextResponse.json(
-        { error: 'Missing email or password' },
+        { error: "Missing email or password" },
         { status: 400 }
       );
     }
@@ -16,75 +22,70 @@ export async function POST(request: NextRequest) {
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-    // Step 1: Sign in with Supabase Auth to get the session
-    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+    const res = NextResponse.json({ success: true });
 
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
+    const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            res.cookies.set(name, value, options)
+          );
+        },
+      },
     });
 
-    if (authError || !authData.user) {
-      throw new Error('Invalid email or password');
+    const { data: authData, error: authError } =
+      await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+    if (authError || !authData.user || !authData.session) {
+      return NextResponse.json(
+        { error: authError?.message || "Invalid email or password." },
+        { status: 401 }
+      );
     }
 
     const userId = authData.user.id;
 
-    // Step 2: Fetch profile from profiles table using service role
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
     });
 
     const { data: profile, error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
+      .from("profiles")
+      .select("*")
+      .eq("id", userId)
       .single();
 
     if (profileError || !profile) {
-      // Profile missing — create it on the fly
-      const { data: newProfile } = await supabaseAdmin
-        .from('profiles')
-        .upsert([{
+      await supabaseAdmin.from("profiles").upsert([
+        {
           id: userId,
           email: authData.user.email,
-          full_name: authData.user.user_metadata?.full_name || '',
-          phone_number: authData.user.user_metadata?.phone_number || '',
+          full_name: authData.user.user_metadata?.full_name || "",
+          phone_number: authData.user.user_metadata?.phone_number || "",
           wallet_balance: 0,
           is_admin: false,
-        }])
-        .select()
-        .single();
-
-      return NextResponse.json({
-        success: true,
-        user: newProfile,
-        session: authData.session,
-      });
+        },
+      ]);
     }
 
-    console.log('Signin successful:', profile.email);
-
-    return NextResponse.json({
-      success: true,
-      user: {
-        id: profile.id,
-        email: profile.email,
-        full_name: profile.full_name,
-        phone_number: profile.phone_number,
-        wallet_balance: profile.wallet_balance,
-        is_admin: profile.is_admin,
-      },
-      session: authData.session,
-    });
-
-  } catch (error: any) {
-    console.error('Error in POST /api/auth/signin:', error);
+    return res;
+  } catch (error: unknown) {
+    console.error("Error in POST /api/auth/signin:", error);
+    const message =
+      error instanceof Error ? error.message : "Authentication failed";
     return NextResponse.json(
-      {
-        error: error.message || 'Authentication failed',
-        details: String(error),
-      },
+      { error: message, details: String(error) },
       { status: 401 }
     );
   }

@@ -26,7 +26,6 @@ import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabase/client";
 import { sanitizeSearchParamsString } from "@/lib/sanitize-auth-search-params";
 
 const FormSchema = z.object({
@@ -69,6 +68,7 @@ function LoginForm() {
       try {
         res = await fetch("/api/auth/signin", {
           method: "POST",
+          credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             email: data.email,
@@ -83,7 +83,6 @@ function LoginForm() {
 
       const body = (await res.json().catch(() => ({}))) as {
         error?: string;
-        session?: { access_token?: string; refresh_token?: string };
       };
 
       if (!res.ok) {
@@ -94,27 +93,9 @@ function LoginForm() {
         );
       }
 
-      const session = body.session;
-      if (!session?.access_token || !session?.refresh_token) {
-        throw new Error("Sign in succeeded but no session was returned.");
-      }
-
-      const { error: sessionError } = await supabase.auth.setSession({
-        access_token: session.access_token,
-        refresh_token: session.refresh_token,
-      });
-
-      if (sessionError) {
-        throw new Error(
-          sessionError.message || "Could not establish your session."
-        );
-      }
-
-      // Hard navigation — fully unloads the login page immediately
-      // and loads the destination with the fresh session already in cookies.
-      // This avoids the flicker caused by router.push + router.refresh
-      // where the login page stays visible while the server re-renders.
-      window.location.href = safeNextPath();
+      // Session cookies were set on this response by the API route — no client setSession
+      // (prevents Supabase navigator.locks races with AuthProvider).
+      window.location.assign(safeNextPath());
     } catch (error: unknown) {
       console.error("Login Error:", error);
       toast({
