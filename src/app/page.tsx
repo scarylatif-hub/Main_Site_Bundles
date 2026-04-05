@@ -84,17 +84,24 @@ export default function Home() {
   const networks: NetworkName[] = ["MTN", "Telecel", "AirtelTigo"];
 
   return (
-    <div className="container mx-auto max-w-4xl px-4 py-8 sm:py-12">
-      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-8 text-center">
-        <h1 className="font-headline text-4xl font-bold tracking-tight md:text-5xl">Buy Data Bundle</h1>
-        <p className="mt-2 text-muted-foreground">Fast, easy, and instant delivery to any network</p>
-      </motion.div>
-
-      {user && (
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
-          <WalletDepositCard id="deposit" />
+    <div className="container mx-auto max-w-4xl px-4 pt-2 pb-8 sm:pt-4 sm:pb-12">
+      <div className="mb-4 space-y-3 sm:space-y-4">
+        <motion.div
+          initial={{ opacity: 0, y: -12 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-center"
+        >
+          <h1 className="font-headline text-4xl font-bold tracking-tight md:text-5xl">
+            Buy Data Bundle
+          </h1>
         </motion.div>
-      )}
+
+        {user && (
+          <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
+            <WalletDepositCard id="deposit" />
+          </motion.div>
+        )}
+      </div>
 
       <Card className="shadow-lg">
         <CardHeader className="space-y-4">

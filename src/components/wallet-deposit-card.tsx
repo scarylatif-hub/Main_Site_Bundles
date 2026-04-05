@@ -66,34 +66,38 @@ export function WalletDepositCard({ id, className }: WalletDepositCardProps) {
 
   return (
     <Card id={id} className={className}>
-      <CardHeader>
-        <CardTitle>
-          Wallet Balance: GHS {userProfile?.wallet_balance?.toFixed(2) || "0.00"}
-        </CardTitle>
-        <CardDescription>
-         Paystack charges 2% on top of the amount you enter.
-          we absorb 0.5% so you pay 1.5% on top. Buying data from your wallet has no extra fee.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3 sm:flex-row sm:gap-4">
-        <div className="flex-1">
-          <Input
-            type="number"
-            value={depositAmount}
-            onChange={(e) => setDepositAmount(e.target.value)}
-            placeholder="Amount (GHS)"
-            min="1"
-          />
-        </div>
-        <Button
-          type="button"
-          onClick={handleProceedToPayment}
-          disabled={!user?.email || parseFloat(depositAmount) < 1 || isInitializing}
-          className="shrink-0"
-        >
-          {isInitializing ? "Processing…" : "Deposit Funds"}
-        </Button>
-      </CardContent>
-    </Card>
+  <CardHeader className="pb-3">
+    <CardTitle className="text-xl">
+      Wallet Balance: GHS {userProfile?.wallet_balance?.toFixed(2) || "0.00"}
+    </CardTitle>
+    <CardDescription className="text-sm leading-tight">
+      Paystack charges 2%. We absorb 0.5%, so you pay <strong>1.5% extra</strong>.
+      <br className="hidden sm:block" />
+    </CardDescription>
+  </CardHeader>
+
+  <CardContent className="pt-2">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-3">
+      <div className="flex-1">
+        <Input
+          type="number"
+          value={depositAmount}
+          onChange={(e) => setDepositAmount(e.target.value)}
+          placeholder="Amount in GHS"
+          min="1"
+          className="h-11"
+        />
+      </div>
+      <Button
+        type="button"
+        onClick={handleProceedToPayment}
+        disabled={!user?.email || parseFloat(depositAmount) < 1 || isInitializing}
+        className="shrink-0 h-11 px-8"
+      >
+        {isInitializing ? "Processing…" : "Deposit Funds"}
+      </Button>
+    </div>
+  </CardContent>
+</Card>
   );
 }

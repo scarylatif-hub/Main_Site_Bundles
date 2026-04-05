@@ -90,17 +90,17 @@ export default function WalletPage() {
     return (
 
         
-        <div className="container mx-auto max-w-4xl px-4 py-8 sm:py-12">
+        <div className="container mx-auto max-w-4xl px-4 pt-2 pb-8 sm:pt-4 sm:pb-12">
             <PageHeader
                 title="My Wallet"
                 description="Manage your balance and view your transaction history."
             />
 
-            <div className="mt-8 space-y-8">
+            <div className="mt-4 space-y-6">
                 <WalletDepositCard id="deposit" />
             </div>
 
-            <div className="mt-8 grid gap-8 md:grid-cols-3">
+            <div className="mt-6 grid gap-8 md:grid-cols-3">
                 <div className="md:col-span-1 space-y-8">
                     <Card>
                         <CardHeader>
