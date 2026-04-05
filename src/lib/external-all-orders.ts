@@ -1,3 +1,5 @@
+// src/lib/external-all-orders.ts
+
 import {
   cheapBundlesAllOrdersRequestUrl,
   getCheapBundlesApiKey,
@@ -22,7 +24,7 @@ export type AdminOrderRow = {
   network_label: string | null;
   bundle_amount: string | null;
   status: string;
-  /** Signed amount as stored in ledger; display uses Math.abs */
+  /** Positive amount in GHS (retail price) */
   amount: number;
   customerEmail: string;
   customerName: string;
@@ -80,14 +82,8 @@ function extractOrdersArray(data: unknown): unknown[] | null {
   if (!data || typeof data !== "object") return null;
   const o = data as Record<string, unknown>;
   const keys = [
-    "orders",
-    "data",
-    "results",
-    "items",
-    "records",
-    "list",
-    "payload",
-    "content",
+    "orders", "data", "results", "items",
+    "records", "list", "payload", "content",
   ];
   for (const k of keys) {
     const v = o[k];
@@ -97,9 +93,7 @@ function extractOrdersArray(data: unknown): unknown[] | null {
 }
 
 /**
- * Fetch raw order objects from the provider `all-orders` endpoint (GET, server-side key).
- * Uses `cheapBundlesAllOrdersRequestUrl()` so you can widen results via
- * `CHEAP_BUNDLES_ALL_ORDERS_QUERY` (e.g. `limit=10000`) if the API paginates.
+ * Fetch raw order objects from the provider `all-orders` endpoint.
  */
 export async function fetchExternalAllOrdersRaw(): Promise<unknown[]> {
   const apiKey = getCheapBundlesApiKey();
@@ -154,23 +148,12 @@ export function normalizeExternalOrder(
       : `ext-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
   const codeVal = pick(o, [
-    "transaction_id",
-    "transactionId",
-    "transaction_code",
-    "transactionCode",
-    "reference",
-    "ref",
-    "order_reference",
+    "transaction_id", "transactionId", "transaction_code",
+    "transactionCode", "reference", "ref", "order_reference",
   ]);
   const transaction_code = codeVal != null ? String(codeVal) : null;
 
-  const dateVal = pick(o, [
-    "createdAt",
-    "created_at",
-    "date",
-    "order_date",
-    "timestamp",
-  ]);
+  const dateVal = pick(o, ["createdAt", "created_at", "date", "order_date", "timestamp"]);
   const created_at =
     dateVal != null
       ? (() => {
@@ -180,15 +163,8 @@ export function normalizeExternalOrder(
       : new Date().toISOString();
 
   const phoneVal = pick(o, [
-    "beneficiary_number",
-    "recipient_msisdn",
-    "recipientMsisdn",
-    "beneficiary",
-    "phone",
-    "msisdn",
-    "recipient_phone",
-    "recipientPhone",
-    "mobile",
+    "beneficiary_number", "recipient_msisdn", "recipientMsisdn",
+    "beneficiary", "phone", "msisdn", "recipient_phone", "recipientPhone", "mobile",
   ]);
   const recipient_msisdn = phoneVal != null ? String(phoneVal).trim() : null;
 
@@ -203,14 +179,8 @@ export function normalizeExternalOrder(
   }
 
   const volVal = pick(o, [
-    "bundle_amount",
-    "bundleAmount",
-    "volume",
-    "data_amount",
-    "dataAmount",
-    "size",
-    "package",
-    "plan",
+    "bundle_amount", "bundleAmount", "volume", "data_amount",
+    "dataAmount", "size", "package", "plan",
   ]);
   const bundle_amount = volVal != null ? String(volVal) : null;
 
@@ -250,7 +220,7 @@ export function normalizeExternalOrder(
     network_label,
     bundle_amount,
     status,
-    amount: -Math.abs(price),
+    amount: Math.abs(price), // ← positive always; dashboard sums work correctly
     customerEmail: prof?.email ?? "—",
     customerName: prof?.name ?? "",
   };
@@ -285,14 +255,42 @@ export function transactionToAdminRow(
     network_label: null,
     bundle_amount: t.bundle_amount,
     status: t.status,
-    amount: t.amount,
+    amount: Math.abs(t.amount), // ← positive always
     customerEmail: c?.email ?? "—",
     customerName: c?.name ?? "",
   };
 }
 
+/**
+ * Index latest status from the provider "all orders" payload by every id the API might use.
+ */
+export function buildApiOrderStatusLookup(rawOrders: unknown[]): Map<string, string> {
+  const m = new Map<string, string>();
+  const noProfiles = new Map<string, { email: string; name: string; id: string }>();
+  for (const raw of rawOrders) {
+    const row = normalizeExternalOrder(raw, noProfiles);
+    if (!row) continue;
+    const st = String(row.status ?? "").trim() || "unknown";
+    for (const k of [
+      row.reference,
+      row.transaction_code,
+      row.provider_order_id,
+      row.id,
+    ]) {
+      const key = k != null ? String(k).trim() : "";
+      if (key) m.set(key, st);
+    }
+  }
+  return m;
+}
+
 export function buildPhoneProfileMap(
-  profiles: { id: string; email: string | null; full_name: string | null; phone_number: string | null }[]
+  profiles: {
+    id: string;
+    email: string | null;
+    full_name: string | null;
+    phone_number: string | null;
+  }[]
 ): Map<string, { email: string; name: string; id: string }> {
   const m = new Map<string, { email: string; name: string; id: string }>();
   for (const p of profiles) {
