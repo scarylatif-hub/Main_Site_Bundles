@@ -96,7 +96,10 @@ export function usePaystack({
         );
 
         const PS = (window as any).PaystackPop;
+        let verifyStarted = false;
         const finishVerify = () => {
+          if (verifyStarted) return;
+          verifyStarted = true;
           verifyPaymentWithPolling(reference)
             .then(() => {
               toast({
@@ -169,10 +172,24 @@ export function usePaystack({
   };
 }
 
+/** One in-flight verify per reference (prevents double callback + parallel polls). */
+const verifyInFlight = new Map<string, Promise<void>>();
+
 /**
  * Poll verify+credit every 2s (webhook may also credit; idempotent).
  */
 async function verifyPaymentWithPolling(reference: string): Promise<void> {
+  const existing = verifyInFlight.get(reference);
+  if (existing) return existing;
+
+  const run = verifyPaymentWithPollingImpl(reference).finally(() => {
+    verifyInFlight.delete(reference);
+  });
+  verifyInFlight.set(reference, run);
+  return run;
+}
+
+async function verifyPaymentWithPollingImpl(reference: string): Promise<void> {
   const maxAttempts = 45;
 
   for (let i = 0; i < maxAttempts; i++) {
@@ -192,8 +209,21 @@ async function verifyPaymentWithPolling(reference: string): Promise<void> {
       continue;
     }
 
-    if (data.credited === true || data.reason === 'already_processed') {
+    const credited =
+      data.credited === true ||
+      data.reason === 'already_processed' ||
+      data.source === 'existing' ||
+      data.source === 'webhook_won_race' ||
+      data.source === 'legacy_ledger';
+
+    if (credited) {
       return;
+    }
+
+    if (data.reason === 'no_user') {
+      throw new Error(
+        'Payment succeeded but user metadata is missing. Contact support with your Paystack reference.'
+      );
     }
 
     if (data.reason === 'rpc_error') {

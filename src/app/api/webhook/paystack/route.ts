@@ -3,10 +3,7 @@ import { handlePaystackWebhookPost } from "@/lib/paystack-webhook";
 
 export const dynamic = "force-dynamic";
 
-/**
- * POST /api/paystack/webhook
- * Same handler as /api/webhook/paystack (keep this URL if already registered in Paystack).
- */
+/** POST https://yourdomain.com/api/webhook/paystack — register in Paystack dashboard */
 export async function POST(request: NextRequest) {
   return handlePaystackWebhookPost(request);
 }

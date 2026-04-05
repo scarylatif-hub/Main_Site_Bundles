@@ -75,6 +75,7 @@ export async function POST(request: NextRequest) {
       reference,
       metadata: {
         userId: user.id,
+        user_id: user.id,
         type: metadataType,
         description,
         timestamp: new Date().toISOString(),
