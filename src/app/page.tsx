@@ -144,6 +144,7 @@ export default function Home() {
                         <p className="text-xs text-muted-foreground">{pkg.validity || 'Non-expiry'}</p>
                       </div>
                     </div>
+                    {/* hh */}
                     <div className="flex items-center gap-4">
                       <p className="font-bold">GHS {pkg.price.toFixed(2)}</p>
                       <Button size="sm" className="opacity-0 group-hover:opacity-100 transition-opacity"><ShoppingCart className="h-4 w-4 mr-1" />Buy</Button>
