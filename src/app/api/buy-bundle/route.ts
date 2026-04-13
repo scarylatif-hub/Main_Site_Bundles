@@ -39,7 +39,9 @@ function isDuplicateOrConflictResponse(
     /duplicate|conflicting transaction/.test(m) ||
     /order already exist/.test(m) ||
     /already exists/.test(m) ||
-    /already exist/.test(m)
+    /already exist/.test(m) ||
+    /couldn'?t place order/.test(m) ||
+    /check under each product line/.test(m)
   ) {
     return true;
   }

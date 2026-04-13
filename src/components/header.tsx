@@ -1,5 +1,7 @@
 "use client";
 
+// src/components/header.tsx
+
 import Link from "next/link";
 import { Logo } from "@/components/logo";
 import { CartIcon } from "@/components/cart-icon";
@@ -25,12 +27,24 @@ const navLinks = [
   { href: "/wallet", label: "Wallet" },
 ];
 
-function UserNav() {
-  const { user, loading, logout } = useAuth();
-
-  if (loading) {
-    return null;
+function getInitials(name: string | null | undefined, email: string | null | undefined): string {
+  if (name && name.trim()) {
+    return name
+      .trim()
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .toUpperCase()
+      .slice(0, 2);
   }
+  if (email) return email[0].toUpperCase();
+  return "U";
+}
+
+function UserNav() {
+  const { user, userProfile, loading, logout } = useAuth();
+
+  if (loading) return null;
 
   if (!user) {
     return (
@@ -45,20 +59,22 @@ function UserNav() {
     );
   }
 
-  const displayName = user.user_metadata?.full_name || "User";
-  const userInitials =
-    displayName
-      ?.split(" ")
-      .map((n: string) => n[0])
-      .join("") || user.email?.[0].toUpperCase() || "U";
+  const displayName =
+    userProfile?.full_name ||
+    user.user_metadata?.full_name ||
+    "User";
+
+  const initials = getInitials(displayName, user.email);
+
+  // Read avatar from the profiles row (kept in sync by the avatar picker)
+  const avatarSrc = userProfile?.avatar_url ?? "";
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="relative h-8 w-8 rounded-full">
-          <Avatar className="h-9 w-9">
-            <AvatarImage src={user.user_metadata.avatar_url || ""} alt={displayName} />
-            <AvatarFallback>{userInitials}</AvatarFallback>
+      <Button variant="ghost" className="relative h-10 w-10 rounded-full">
+      <Avatar className="h-10 w-10">            <AvatarImage src={avatarSrc} alt={displayName} />
+            <AvatarFallback>{initials}</AvatarFallback>
           </Avatar>
         </Button>
       </DropdownMenuTrigger>
@@ -103,20 +119,19 @@ function UserNav() {
 }
 
 function WalletBalance() {
-    const { user, userProfile } = useAuth();
-    
-    if (!user) return null;
+  const { user, userProfile } = useAuth();
+  if (!user) return null;
 
-    return (
-         <Button variant="ghost" className="p-0 h-auto" asChild>
-            <Link href="/wallet" className="flex items-center gap-2">
-                <Wallet className="h-5 w-5 text-muted-foreground" />
-                <span className="font-semibold text-sm">
-                    GHS {userProfile?.wallet_balance?.toFixed(2) ?? '0.00'}
-                </span>
-            </Link>
-        </Button>
-    )
+  return (
+    <Button variant="ghost" className="p-0 h-auto" asChild>
+      <Link href="/wallet" className="flex items-center gap-2">
+        <Wallet className="h-5 w-5 text-muted-foreground" />
+        <span className="font-semibold text-sm">
+          GHS {userProfile?.wallet_balance?.toFixed(2) ?? "0.00"}
+        </span>
+      </Link>
+    </Button>
+  );
 }
 
 export function Header() {
@@ -131,7 +146,6 @@ export function Header() {
           <div className="md:hidden shrink-0 min-w-0">
             <Logo />
           </div>
-          {/* Mobile: no top nav links — use bottom nav + profile menu */}
           <nav className="hidden md:flex items-center gap-6 text-sm mr-6">
             {navLinks.map((link) => (
               <Link
