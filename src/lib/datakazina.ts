@@ -14,6 +14,7 @@
 
 const API_KEY  = process.env.DATAKAZINA_API_KEY;
 const BASE_URL = process.env.DATAKAZINA_BASE_URL; // https://reseller.dakazinabusinessconsult.com/api/v1
+const MAIN_BASE_URL = process.env.DATAKAZINA_MAIN_BASE_URL; // Main DataKazina endpoint
 
 if (!API_KEY || !BASE_URL) {
   console.warn("[datakazina] Missing env vars", {
@@ -67,10 +68,13 @@ class DataKazinaAPI {
 
   private async request<T = Record<string, unknown>>(
     path:    string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    useMainEndpoint: boolean = false
   ): Promise<DKResult<T>> {
-    const url = `${BASE_URL}${path}`;
-    console.log(`[datakazina] ${options.method ?? "GET"} ${url}`);
+    const baseUrl = useMainEndpoint && MAIN_BASE_URL ? MAIN_BASE_URL : BASE_URL;
+    const url = `${baseUrl}${path}`;
+    const endpointLabel = useMainEndpoint && MAIN_BASE_URL ? " (main endpoint)" : "";
+    console.log(`[datakazina] ${options.method ?? "GET"} ${url}${endpointLabel}`);
 
     try {
       const response = await fetch(url, {
@@ -145,13 +149,15 @@ class DataKazinaAPI {
    *
    * Response shape is undocumented — we log rawText so you can see
    * exactly what comes back the first time it runs.
+   *
+   * @param useMainEndpoint - If true, uses DATAKAZINA_MAIN_BASE_URL instead of DATAKAZINA_BASE_URL
    */
-  purchaseDataPackage(params: PurchaseParams): Promise<DKResult> {
+  purchaseDataPackage(params: PurchaseParams, useMainEndpoint: boolean = false): Promise<DKResult> {
     console.log("[datakazina] purchaseDataPackage params:", params);
     return this.request("/buy-data-package?", {
       method: "POST",
       body:   JSON.stringify(params),
-    });
+    }, useMainEndpoint);
   }
 
   /**

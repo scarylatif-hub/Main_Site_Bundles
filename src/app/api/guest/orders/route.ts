@@ -19,7 +19,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient }          from "@/lib/supabase/admin";
 import { datakazinaAPI }              from "@/lib/datakazina";
 import { retryWithBackoff }           from "@/lib/server/retry";
-import { normalizePhoneNumber, mapToDataKazinaNetworkId } from "@/lib/networks";
+import { normalizePhoneNumber }       from "@/lib/networks";
 
 // ── Paystack verification ─────────────────────────────────────────────────────
 
@@ -122,10 +122,14 @@ export async function POST(req: NextRequest) {
     console.error("[guest/orders] Failed to fetch packages:", pkgResult.rawText);
     return NextResponse.json({ error: "Could not fetch available packages" }, { status: 502 });
   }
+  console.log("[guest/orders] Available packages count:", pkgResult.data.length);
+  console.log("[guest/orders] Looking for package_id:", package_id);
   const pkg = pkgResult.data.find((p) => String(p.id) === String(package_id));
   if (!pkg) {
+    console.error("[guest/orders] Package not found. Available IDs:", pkgResult.data.map(p => p.id));
     return NextResponse.json({ error: "Package not found" }, { status: 404 });
   }
+  console.log("[guest/orders] Found package:", pkg);
 
   // 6. Normalise phone number
   const recipient_msisdn = normalizePhoneNumber(String(phone_number));
@@ -160,9 +164,9 @@ export async function POST(req: NextRequest) {
   // 8. Call DataKazina (with retry)
   const dakazinaRef = `guest-${newOrder.id}`;
 
-  // Map frontend network ID to DataKazina network ID
-  const datakazinaNetworkId = mapToDataKazinaNetworkId(Number(network_id));
-  console.log("[guest/orders] Network ID mapping:", { frontend: Number(network_id), datakazina: datakazinaNetworkId });
+  // Client already sends DataKazina network IDs, no mapping needed
+  const datakazinaNetworkId = Number(network_id);
+  console.log("[guest/orders] Using network_id:", datakazinaNetworkId);
 
   const purchaseParams = {
     recipient_msisdn,

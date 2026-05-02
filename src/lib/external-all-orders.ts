@@ -29,6 +29,8 @@ export type AdminOrderRow = {
   amount: number;
   customerEmail: string;
   customerName: string;
+  /** Whether this order came from a store (vs main site) */
+  isStore: boolean;
 };
 
 function pick<T extends Record<string, unknown>>(o: T, keys: string[]): unknown {
@@ -224,6 +226,7 @@ export function normalizeExternalOrder(
     amount: Math.abs(price), // ← positive always; dashboard sums work correctly
     customerEmail: prof?.email ?? "—",
     customerName: prof?.name ?? "",
+    isStore: false,
   };
 }
 
@@ -259,6 +262,46 @@ export function transactionToAdminRow(
     amount: Math.abs(t.amount), // ← positive always
     customerEmail: c?.email ?? "—",
     customerName: c?.name ?? "",
+    isStore: false,
+  };
+}
+
+/**
+ * Convert store orders from the local database to AdminOrderRow format.
+ * Store orders have customer_email and customer_phone fields instead of user_id.
+ */
+export function storeOrderToAdminRow(
+  order: {
+    id: string;
+    store_id: string;
+    package_id: number;
+    network_id: number;
+    phone_number: string;
+    amount: number;
+    status: string;
+    customer_email: string | null;
+    customer_phone: string | null;
+    created_at: string;
+    paystack_transaction_id: string | null;
+  },
+  storeName: string
+): AdminOrderRow {
+  return {
+    id: order.id,
+    reference: order.paystack_transaction_id,
+    provider_order_id: null,
+    transaction_code: order.paystack_transaction_id,
+    user_id: order.store_id,
+    created_at: order.created_at,
+    recipient_msisdn: order.customer_phone || order.phone_number,
+    network_id: order.network_id,
+    network_label: null,
+    bundle_amount: null, // Would need to fetch package details
+    status: order.status,
+    amount: Math.abs(order.amount),
+    customerEmail: order.customer_email || "—",
+    customerName: storeName,
+    isStore: true,
   };
 }
 
