@@ -22,6 +22,12 @@ export type Profile = {
   wallet_balance: number;
   updated_at: string | null;
   is_admin: boolean;
+  is_reseller: boolean | null;
+  reseller_approved: boolean | null;
+  store_active: boolean | null;
+  store_name: string | null;
+  reseller_slug: string | null;
+  profit_margin: number | null;
 };
 
 export type AuthContextType = {

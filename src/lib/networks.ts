@@ -46,3 +46,25 @@ export const validatePhoneNumber = (phone: string): boolean => {
   // MTN 024,025,053,054,055,059 | Telecel 020,050 | AirtelTigo 026,027,056,057
   return /^0(20|24|25|26|27|50|53|54|55|56|57|59)\d{7}$/.test(normalized);
 };
+
+/**
+ * Map frontend network ID to DataKazina network ID.
+ * 
+ * Frontend IDs (from NETWORKS):
+ * - MTN: 1
+ * - Telecel: 2
+ * - AirtelTigo: 3
+ * 
+ * DataKazina IDs (from API):
+ * - MTN: 3
+ * - Airtel Tigo: 2
+ * - Telecel: 4 (inferred)
+ */
+export const mapToDataKazinaNetworkId = (frontendNetworkId: number): number => {
+  const mapping: Record<number, number> = {
+    1: 3, // Frontend MTN → DataKazina MTN
+    2: 4, // Frontend Telecel → DataKazina Telecel
+    3: 2, // Frontend AirtelTigo → DataKazina Airtel Tigo
+  };
+  return mapping[frontendNetworkId] ?? frontendNetworkId;
+};

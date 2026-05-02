@@ -1,11 +1,8 @@
 /**
  * src/app/api/buy-bundle/route.ts
  *
- * Authenticated wallet purchase using DataKazina /buy-data-package.
- *
- * Because the DataKazina response body is undocumented, we treat any
- * 2xx HTTP status as a successful delivery. The raw response is logged
- * so you can see the real shape the first time a purchase goes through.
+ * Every failure point logs a [buy-bundle][STEP-N] prefix so you can
+ * grep your terminal / Vercel logs and see exactly where it broke.
  */
 
 import { NextRequest, NextResponse }   from "next/server";
@@ -13,7 +10,7 @@ import { createClient }                 from "@/lib/supabase/server";
 import { createAdminClient }            from "@/lib/supabase/admin";
 import type { SupabaseClient }          from "@supabase/supabase-js";
 import { datakazinaAPI }                from "@/lib/datakazina";
-import { normalizePhoneNumber, mapToDataKazinaNetworkId } from "@/lib/networks";
+import { normalizePhoneNumber }         from "@/lib/networks";
 import { notifyAdminBundlePurchase }    from "@/lib/server/notifications";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -25,7 +22,7 @@ async function abortPendingPurchase(
   restoreBalance: number,
   reason:         string
 ): Promise<void> {
-  console.error(`[buy-bundle][ABORT] ${reason}`);
+  console.error(`[buy-bundle][ABORT] ${reason} — restoring balance ${restoreBalance} for user ${userId}`);
   await Promise.all([
     admin
       .from("profiles")
@@ -51,90 +48,89 @@ function isDuplicateOrConflict(httpStatus: number, rawText: string): boolean {
   );
 }
 
-/**
- * Extract the best available transaction code from whatever DataKazina returns.
- * Since the response shape is undocumented we check every likely field name.
- */
-function extractProviderCode(data: Record<string, unknown>, fallback: string): string {
-  const candidates = [
-    "transaction_code",
-    "transactionCode",
-    "transaction_id",
-    "transactionId",
-    "reference",
-    "ref",
-    "order_id",
-    "orderId",
-    "id",
-  ];
-  for (const key of candidates) {
-    if (data[key] && String(data[key]).trim()) {
-      return String(data[key]).trim();
-    }
-  }
-  // DataKazina might nest under message or status objects
-  for (const val of Object.values(data)) {
-    if (typeof val === "string" && val.trim().length > 4) {
-      // Return first non-trivial string value as a last resort
-      return val.trim();
-    }
-  }
-  return fallback;
-}
-
 // ── Route handler ─────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
 
-  // STEP 1 — Auth
+  // ── STEP 1: Auth ─────────────────────────────────────────────────────────
   const supabase = await createClient();
   const { data: { user }, error: authErr } = await supabase.auth.getUser();
   if (authErr || !user) {
-    console.error("[buy-bundle][STEP-1] Auth failed:", authErr?.message);
+    console.error("[buy-bundle][STEP-1] Auth failed:", authErr?.message ?? "no user");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  console.log("[buy-bundle][STEP-1] Auth OK — user:", user.id);
 
-  // STEP 2 — Parse and validate body
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  const { recipientMsisdn, networkId, sharedBundle, price, dataAmount } = body as {
+  // ── STEP 2: Parse body ────────────────────────────────────────────────────
+  let body: {
     recipientMsisdn?: unknown;
     networkId?:       unknown;
     sharedBundle?:    unknown;
     price?:           unknown;
     dataAmount?:      unknown;
   };
+  try {
+    body = await req.json();
+  } catch (e) {
+    console.error("[buy-bundle][STEP-2] JSON parse failed:", e);
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
 
-  console.log("[buy-bundle][STEP-2] Body:", {
+  const { recipientMsisdn, networkId, sharedBundle, price, dataAmount } = body;
+
+  // Log exactly what arrived so you can see type mismatches
+  console.log("[buy-bundle][STEP-2] Body received:", {
     recipientMsisdn,
-    networkId,      networkIdType:    typeof networkId,
-    sharedBundle,   sharedBundleType: typeof sharedBundle,
-    price,          priceType:        typeof price,
+    networkId,
+    networkIdType:   typeof networkId,
+    sharedBundle,
+    sharedBundleType: typeof sharedBundle,
+    price,
+    priceType:       typeof price,
     dataAmount,
   });
 
-  if (!recipientMsisdn || networkId == null || sharedBundle == null || price == null || !dataAmount) {
-    console.error("[buy-bundle][STEP-2] Missing fields");
+  if (
+    !recipientMsisdn ||
+    networkId  == null ||
+    sharedBundle == null ||
+    price      == null ||
+    !dataAmount
+  ) {
+    console.error("[buy-bundle][STEP-2] Validation failed — missing fields:", {
+      hasRecipient:    !!recipientMsisdn,
+      hasNetworkId:    networkId  != null,
+      hasSharedBundle: sharedBundle != null,
+      hasPrice:        price      != null,
+      hasDataAmount:   !!dataAmount,
+    });
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
   const p = Number(price);
   if (!Number.isFinite(p) || p <= 0) {
+    console.error("[buy-bundle][STEP-2] Invalid price:", price);
     return NextResponse.json({ error: "Invalid price" }, { status: 400 });
   }
 
   const recipient_msisdn = normalizePhoneNumber(String(recipientMsisdn));
   if (!recipient_msisdn || recipient_msisdn.length < 10) {
-    console.error("[buy-bundle][STEP-2] Bad phone:", recipientMsisdn, "→", recipient_msisdn);
+    console.error("[buy-bundle][STEP-2] Invalid phone after normalise:", {
+      raw: recipientMsisdn,
+      normalised: recipient_msisdn,
+    });
     return NextResponse.json({ error: "Invalid recipient phone number" }, { status: 400 });
   }
 
-  // STEP 3 — Load wallet
+  console.log("[buy-bundle][STEP-2] Validated OK:", {
+    recipient_msisdn,
+    networkId: Number(networkId),
+    sharedBundle: Number(sharedBundle),
+    price: p,
+    dataAmount,
+  });
+
+  // ── STEP 3: Load wallet ───────────────────────────────────────────────────
   const admin = createAdminClient();
   const { data: profile, error: profileErr } = await admin
     .from("profiles")
@@ -148,16 +144,17 @@ export async function POST(req: NextRequest) {
   }
 
   const balanceBefore = Number(profile.wallet_balance);
-  console.log("[buy-bundle][STEP-3] Balance:", balanceBefore, "required:", p);
+  console.log("[buy-bundle][STEP-3] Wallet balance:", balanceBefore, "— required:", p);
 
   if (balanceBefore < p) {
+    console.error("[buy-bundle][STEP-3] Insufficient funds:", { balanceBefore, required: p });
     return NextResponse.json(
       { error: "Insufficient funds. Please top up your wallet." },
       { status: 400 }
     );
   }
 
-  // STEP 4 — Debit wallet + insert pending transaction
+  // ── STEP 4: Debit wallet + insert pending transaction ─────────────────────
   const reference   = `loc-${crypto.randomUUID()}`;
   const description = `Purchase of ${dataAmount} for ${recipient_msisdn}`;
 
@@ -187,7 +184,9 @@ export async function POST(req: NextRequest) {
 
   if (insertErr) {
     console.error("[buy-bundle][STEP-4] Transaction insert failed:", {
-      code: insertErr.code, message: insertErr.message,
+      code:    insertErr.code,
+      message: insertErr.message,
+      details: insertErr.details,
     });
     await admin
       .from("profiles")
@@ -196,37 +195,34 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Could not create order record" }, { status: 500 });
   }
 
-  console.log("[buy-bundle][STEP-4] Wallet debited, pending tx created:", reference);
+  console.log("[buy-bundle][STEP-4] Wallet debited, pending tx inserted. Reference:", reference);
 
-  // STEP 5 — Call DataKazina /buy-data-package
-  // Map frontend network ID to DataKazina network ID
-  const datakazinaNetworkId = mapToDataKazinaNetworkId(Number(networkId));
-  console.log("[buy-bundle][STEP-5] Network ID mapping:", { frontend: Number(networkId), datakazina: datakazinaNetworkId });
-
+  // ── STEP 5: Call DataKazina ───────────────────────────────────────────────
   const purchaseParams = {
     recipient_msisdn,
-    network_id:       datakazinaNetworkId,
-    shared_bundle:    Number(sharedBundle), // pkg.id from the package list
+    network_id:       Number(networkId),
+    shared_bundle:    Number(sharedBundle),
     incoming_api_ref: reference,
   };
-  console.log("[buy-bundle][STEP-5] Calling DataKazina:", purchaseParams);
+  console.log("[buy-bundle][STEP-5] Calling DataKazina with:", purchaseParams);
 
   try {
     const result = await datakazinaAPI.purchaseDataPackage(purchaseParams);
 
-    // Log the full raw response so we learn what DataKazina actually returns
-    console.log("[buy-bundle][STEP-5] DataKazina response:", {
+    console.log("[buy-bundle][STEP-5] DataKazina raw response:", {
       ok:      result.ok,
       status:  result.status,
-      rawText: result.rawText,
       data:    result.ok ? result.data : null,
+      rawText: result.ok ? "" : result.rawText,
     });
 
-    // STEP 6a — Provider error
+    // ── STEP 6a: Provider error ─────────────────────────────────────────────
     if (!result.ok) {
       const isDupe = isDuplicateOrConflict(result.status, result.rawText);
-      console.error("[buy-bundle][STEP-6a] Provider error:", {
-        status: result.status, rawText: result.rawText, isDupe,
+      console.error("[buy-bundle][STEP-6a] DataKazina error:", {
+        status:  result.status,
+        rawText: result.rawText,
+        isDupe,
       });
 
       if (isDupe) {
@@ -237,27 +233,42 @@ export async function POST(req: NextRequest) {
           .eq("reference", reference);
 
         return NextResponse.json(
-          { error: "Order already in progress. Check My Orders or wait a few minutes.", code: "ORDER_IN_PROGRESS" },
+          {
+            error: "Order already in progress for this number and bundle. " +
+                   "Check My Orders or wait a few minutes.",
+            code: "ORDER_IN_PROGRESS",
+          },
           { status: 409 }
         );
       }
 
       await abortPendingPurchase(admin, user.id, reference, balanceBefore, result.rawText);
       return NextResponse.json(
-        { error: result.rawText || "Provider rejected the request", code: "PROVIDER_ERROR" },
+        { error: result.rawText || "Provider rejected the purchase request", code: "PROVIDER_ERROR" },
         { status: result.status >= 400 ? result.status : 502 }
       );
     }
 
-    // STEP 6b — 2xx = success (response shape may vary)
-    const providerCode = extractProviderCode(
-      result.data as Record<string, unknown>,
-      reference // fallback to our own reference if DataKazina returns nothing useful
-    );
+    // ── STEP 6b: Success ────────────────────────────────────────────────────
+    const providerCode =
+      result.data.transaction_code ??
+      result.data.reference ??
+      reference;
 
-    console.log("[buy-bundle][STEP-6b] Success. providerCode:", providerCode);
+    console.log("[buy-bundle][STEP-6b] Success — providerCode:", providerCode);
 
-    // Mark transaction as placed
+    if (!providerCode) {
+      console.error("[buy-bundle][STEP-6b] No transaction code in response:", result.data);
+      await abortPendingPurchase(
+        admin, user.id, reference, balanceBefore,
+        "Provider returned success without transaction code"
+      );
+      return NextResponse.json(
+        { error: "Provider returned success without a transaction reference. Contact support." },
+        { status: 502 }
+      );
+    }
+
     const patch = {
       reference:        providerCode,
       transaction_code: providerCode,
@@ -272,7 +283,6 @@ export async function POST(req: NextRequest) {
       .eq("reference", reference);
 
     if (updateErr) {
-      // Fallback: match by transaction_code in case reference already changed
       console.warn("[buy-bundle][STEP-6b] Primary update failed, trying fallback:", updateErr.message);
       await admin
         .from("transactions")
@@ -283,13 +293,14 @@ export async function POST(req: NextRequest) {
 
     void notifyAdminBundlePurchase({
       userId:          user.id,
-      orderId:         providerCode,
+      orderId:         String(providerCode),
       amountGhs:       p,
       dataAmount:      String(dataAmount),
       networkId:       Number(networkId),
       recipientMsisdn: recipient_msisdn,
     });
 
+    console.log("[buy-bundle][STEP-6b] Purchase complete:", providerCode);
     return NextResponse.json({
       success:          true,
       transaction_code: providerCode,

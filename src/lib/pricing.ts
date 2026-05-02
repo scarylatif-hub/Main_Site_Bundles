@@ -1,6 +1,6 @@
 /**
- * Wholesale → retail: e.g. API 4.20 GHS → sell at 4.59 GHS.
- * Override with BUNDLE_RETAIL_MULTIPLIER (e.g. 1.0928571428571428 for 4.59/4.2).
+ * Wholesale → retail: e.g. API 3.85 GHS → sell at 4.38 GHS (14% markup).
+ * Override with BUNDLE_RETAIL_MULTIPLIER (e.g. 1.14 for 14% markup).
  */
 export function getRetailPriceMultiplier(): number {
   const raw = process.env.BUNDLE_RETAIL_MULTIPLIER;
@@ -8,7 +8,7 @@ export function getRetailPriceMultiplier(): number {
     const n = parseFloat(raw);
     if (!Number.isNaN(n) && n > 0) return n;
   }
-  return 4.59 / 4.2;
+  return 1.14; // 14% markup for main website
 }
 
 export function applyRetailPrice(wholesaleGhs: number): number {

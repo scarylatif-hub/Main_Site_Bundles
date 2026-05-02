@@ -1,115 +1,72 @@
 
-import { NextResponse, type NextRequest } from 'next/server';
-import { applyRetailPrice } from '@/lib/pricing';
-import {
-  cheapBundlesPackagesUrl,
-  getCheapBundlesApiKey,
-} from '@/lib/cheap-bundles-config';
+import { NextResponse } from 'next/server';
+import { datakazinaAPI } from '@/lib/datakazina';
 import { NETWORKS } from '@/lib/networks';
 import type { NetworkName } from '@/lib/definitions';
 import { apiNetworkIdToDisplay } from '@/lib/network-id-map';
-import { getRetailPriceGhs, buildFallbackPackagesList } from '@/lib/retail-prices';
 
 export const dynamic = 'force-dynamic';
 
-function mapPackagesWithRetailPricing(raw: unknown[]): unknown[] {
+const ADMIN_MARKUP = 0.14; // 14% admin markup
+
+function mapDataKazinaPackages(raw: unknown[]): unknown[] {
   return raw.map((pkg: any) => {
-    const wholesale =
-      typeof pkg.price === 'number'
-        ? pkg.price
-        : parseFloat(String(pkg.price ?? 0));
-    const rawNetId = Number(pkg.network?.id ?? pkg.network_id);
+    const consolePrice = Number(pkg.console_price || pkg.price || 0);
+    const retailPrice = consolePrice * (1 + ADMIN_MARKUP);
+    
+    const rawNetId = Number(pkg.network_id);
     const displayNetId = Number.isFinite(rawNetId)
       ? apiNetworkIdToDisplay(Math.trunc(rawNetId))
       : 1;
     const netFromId = NETWORKS.find((n) => n.id === displayNetId);
-    const networkName = (pkg.network?.name ?? netFromId?.name ?? 'MTN') as NetworkName;
+    const networkName = (pkg.network || netFromId?.name || 'MTN') as NetworkName;
 
-    const vol =
-      pkg.sharedBundle ??
-      pkg.shared_bundle ??
-      pkg.SharedBundle ??
-      pkg.sharedBundleId ??
-      pkg.volume;
+    const vol = pkg.volume || pkg.shared_bundle;
     const sharedBundle = Number(vol);
-    const dataAmount =
-      pkg.dataAmount ??
-      pkg.data_amount ??
-      (Number.isFinite(sharedBundle) && sharedBundle > 0
-        ? `${sharedBundle} GB`
-        : 'Bundle');
-    const validity = pkg.validity ?? pkg.validity_days ?? '30 days';
-
-    const tablePrice = getRetailPriceGhs(displayNetId, sharedBundle);
-    const retail =
-      tablePrice ??
-      applyRetailPrice(Number.isFinite(wholesale) ? wholesale : 0);
+    const dataAmount = pkg.volumeGB || pkg.volume || pkg.data_amount || `${sharedBundle}GB`;
+    const validity = pkg.validity || '30 days';
 
     return {
-      ...pkg,
-      id:
-        pkg.id != null
-          ? String(pkg.id)
-          : `pkg-${displayNetId}-${sharedBundle}`,
+      id: String(pkg.id),
       network: { id: displayNetId, name: networkName },
       dataAmount,
       validity,
       sharedBundle: Number.isFinite(sharedBundle) ? sharedBundle : 0,
-      wholesalePrice: wholesale,
-      price: retail,
+      wholesalePrice: consolePrice,
+      price: Math.round(retailPrice * 100) / 100,
     };
   });
 }
 
-export async function GET(request: NextRequest) {
-  const apiKey = getCheapBundlesApiKey();
-  const packagesUrl = cheapBundlesPackagesUrl('all-packages');
-
-  const fallback = buildFallbackPackagesList();
-
-  if (!apiKey || !packagesUrl) {
-    console.warn('Cheap Bundles API not configured. Returning catalog prices.');
-    return NextResponse.json(mapPackagesWithRetailPricing(fallback as unknown[]));
-  }
-
+export async function GET() {
   try {
-    const response = await fetch(packagesUrl, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        'X-API-KEY': apiKey,
-      },
-      cache: 'no-store',
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.error(
-        `External API error: ${response.status} ${response.statusText}`,
-        errorBody
+    const pkgResult = await datakazinaAPI.fetchDataPackages();
+    
+    if (!pkgResult.ok || !pkgResult.data) {
+      console.error('[packages] Failed to fetch from DataKazina:', pkgResult.rawText);
+      return NextResponse.json(
+        { error: 'Failed to fetch packages from provider' },
+        { status: pkgResult.status >= 400 ? pkgResult.status : 502 }
       );
-      console.warn('External API failed. Returning catalog prices.');
-      return NextResponse.json(mapPackagesWithRetailPricing(fallback as unknown[]));
     }
 
-    const data = await response.json();
-
-    if (data && Array.isArray(data.packages)) {
-      return NextResponse.json(mapPackagesWithRetailPricing(data.packages));
+    if (pkgResult.data.length === 0) {
+      console.error('No packages returned from DataKazina API');
+      return NextResponse.json(
+        { error: 'No packages available' },
+        { status: 500 }
+      );
     }
 
-    if (Array.isArray(data)) {
-      return NextResponse.json(mapPackagesWithRetailPricing(data));
-    }
-
-    console.error('Unexpected response structure from external API:', data);
-    return NextResponse.json(mapPackagesWithRetailPricing(fallback as unknown[]));
-  } catch (error: unknown) {
-    const errorMessage =
-      error instanceof Error ? error.message : 'Unknown error occurred';
-    console.error('Error fetching from /api/packages:', error);
-    console.warn('Error during package fetch. Returning catalog prices.');
-    return NextResponse.json(mapPackagesWithRetailPricing(fallback as unknown[]));
+    const mappedPackages = mapDataKazinaPackages(pkgResult.data);
+    console.log(`Returning ${mappedPackages.length} packages from DataKazina with 14% markup`);
+    
+    return NextResponse.json(mappedPackages);
+  } catch (error) {
+    console.error('Error fetching packages from DataKazina:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch packages' },
+      { status: 500 }
+    );
   }
 }

@@ -69,6 +69,9 @@ function UserNav() {
   // Read avatar from the profiles row (kept in sync by the avatar picker)
   const avatarSrc = userProfile?.avatar_url ?? "";
 
+  // Check if user is an approved reseller
+  const isApprovedReseller = userProfile?.is_reseller && userProfile?.reseller_approved && userProfile?.store_active;
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -93,6 +96,14 @@ function UserNav() {
             <Link href="/myadminportal/dashboard">
               <User className="mr-2 h-4 w-4" />
               <span>Admin</span>
+            </Link>
+          </DropdownMenuItem>
+        )}
+        {isApprovedReseller && userProfile?.reseller_slug && (
+          <DropdownMenuItem asChild>
+            <Link href="/reseller/dashboard">
+              <Wallet className="mr-2 h-4 w-4" />
+              <span>My Store</span>
             </Link>
           </DropdownMenuItem>
         )}

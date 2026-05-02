@@ -10,7 +10,8 @@ function isPublicPath(pathname: string) {
   return (
     pathname.startsWith("/login/") ||
     pathname.startsWith("/signup/") ||
-    pathname.startsWith("/forgot-password/")
+    pathname.startsWith("/forgot-password/") ||
+    pathname.startsWith("/store/")
   );
 }
 

@@ -11,11 +11,21 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useAuth } from "@/context/auth-context";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AVATAR_OPTIONS, buildAvatarUrl } from "@/lib/avatars";
 import type { Profile } from "@/context/auth-context";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 export default function ProfilePage() {
   const { user, userProfile, loading, logout, refreshUser } = useAuth();
@@ -25,6 +35,14 @@ export default function ProfilePage() {
   const [localProfile, setLocalProfile] = useState<Profile | null>(null);
   const [savingAvatarId, setSavingAvatarId]   = useState<string | null>(null);
   const [avatarError, setAvatarError]         = useState<string | null>(null);
+
+  // Store creation state
+  const [storeModalOpen, setStoreModalOpen] = useState(false);
+  const [storeName, setStoreName] = useState("");
+  const [storeSlug, setStoreSlug] = useState("");
+  const [creatingStore, setCreatingStore] = useState(false);
+  const [storeError, setStoreError] = useState<string | null>(null);
+  const [storeSuccess, setStoreSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     setLocalProfile(userProfile);
@@ -100,6 +118,52 @@ export default function ProfilePage() {
     }
   };
 
+  const handleCreateStore = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!storeName || !storeSlug) return;
+
+    setCreatingStore(true);
+    setStoreError(null);
+    setStoreSuccess(null);
+
+    try {
+      const res = await fetch("/api/reseller/create-store", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storeName, storeSlug }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to create store");
+      }
+
+      setStoreSuccess(data.message);
+      setStoreModalOpen(false);
+      setStoreName("");
+      setStoreSlug("");
+      refreshUser();
+    } catch (error) {
+      setStoreError(error instanceof Error ? error.message : "Failed to create store");
+    } finally {
+      setCreatingStore(false);
+    }
+  };
+
+  const generateSlug = (name: string) => {
+    return name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .substring(0, 50);
+  };
+
+  const handleStoreNameChange = (value: string) => {
+    setStoreName(value);
+    setStoreSlug(generateSlug(value));
+  };
+
   return (
     <div className="container mx-auto max-w-2xl px-4 py-8 sm:py-12">
       <PageHeader
@@ -162,6 +226,112 @@ export default function ProfilePage() {
               </div>
               {avatarError && (
                 <p className="text-xs text-destructive mt-2">{avatarError}</p>
+              )}
+            </div>
+
+            <hr />
+
+            {/* Store section */}
+            <div>
+              <h3 className="font-semibold text-sm">My Store</h3>
+              {storeSuccess && (
+                <p className="text-xs text-green-600 mt-2">{storeSuccess}</p>
+              )}
+              {storeError && (
+                <p className="text-xs text-destructive mt-2">{storeError}</p>
+              )}
+              
+              {!userProfile?.is_reseller ? (
+                <div className="mt-3">
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Create a store to start selling data bundles and earning commission.
+                  </p>
+                  <Dialog open={storeModalOpen} onOpenChange={setStoreModalOpen}>
+                    <DialogTrigger asChild>
+                      <Button>Create Store</Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Create Your Store</DialogTitle>
+                        <DialogDescription>
+                          Set up your store name and URL. Your store will be pending approval.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <form onSubmit={handleCreateStore} className="space-y-4">
+                        <div>
+                          <Label htmlFor="storeName">Store Name</Label>
+                          <Input
+                            id="storeName"
+                            value={storeName}
+                            onChange={(e) => handleStoreNameChange(e.target.value)}
+                            placeholder="My Data Store"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="storeSlug">Store URL Slug</Label>
+                          <Input
+                            id="storeSlug"
+                            value={storeSlug}
+                            onChange={(e) => setStoreSlug(e.target.value)}
+                            placeholder="my-data-store"
+                            required
+                            pattern="[a-z0-9-]+"
+                            title="Only lowercase letters, numbers, and hyphens allowed"
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Your store URL: /store/{storeSlug || "your-slug"}
+                          </p>
+                        </div>
+                        <div className="flex gap-2 justify-end">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setStoreModalOpen(false)}
+                          >
+                            Cancel
+                          </Button>
+                          <Button type="submit" disabled={creatingStore}>
+                            {creatingStore ? "Creating..." : "Create Store"}
+                          </Button>
+                        </div>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Store Name:</span>
+                    <span className="text-sm">{userProfile?.store_name || "—"}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Store URL:</span>
+                    <span className="text-sm text-muted-foreground">
+                      /store/{userProfile?.reseller_slug || "—"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium">Status:</span>
+                    <span className={`text-sm ${
+                      userProfile?.reseller_approved 
+                        ? "text-green-600" 
+                        : "text-yellow-600"
+                    }`}>
+                      {userProfile?.reseller_approved ? "Approved" : "Pending Approval"}
+                    </span>
+                  </div>
+                  {userProfile?.reseller_approved && userProfile?.store_active && (
+                    <div className="space-y-2 mt-2">
+                      <Button asChild className="w-full">
+                        <a href="/reseller/dashboard">Store Dashboard</a>
+                      </Button>
+                      <Button asChild className="w-full" variant="outline">
+                        <a href={`/store/${userProfile.reseller_slug}`}>Visit My Store</a>
+                      </Button>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 

@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DataKazina API Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+        }
+        input, select {
+            padding: 8px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <h1>DataKazina API Test</h1>
+    
+    <div class="test-section">
+        <h2>1. Basic Connectivity Test</h2>
+        <button onclick="testBasicConnectivity()">Test API Connectivity</button>
+        <div id="basic-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. Direct API Test</h2>
+        <button onclick="testDirectAPI()">Test Direct API Calls</button>
+        <div id="direct-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>3. Simple Purchase Test</h2>
+        <div>
+            <input type="text" id="phone" placeholder="Phone (0551053716)" value="0551053716">
+            <input type="number" id="networkId" placeholder="Network ID" value="1">
+            <input type="number" id="sharedBundle" placeholder="Bundle ID" value="1">
+            <input type="number" id="price" placeholder="Price" value="5.0" step="0.1">
+            <input type="text" id="dataAmount" placeholder="Data Amount" value="1GB">
+        </div>
+        <button onclick="testSimplePurchase()">Test Simple Purchase</button>
+        <div id="purchase-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>4. Networks Test</h2>
+        <button onclick="testNetworks()">Fetch Networks</button>
+        <div id="networks-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>5. Packages Test</h2>
+        <div>
+            <input type="number" id="packageNetworkId" placeholder="Network ID" value="1">
+        </div>
+        <button onclick="testPackages()">Fetch Packages</button>
+        <div id="packages-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>6. Admin Orders Display Test</h2>
+        <button onclick="testAdminOrders()">Test Admin Orders Display</button>
+        <div id="admin-orders-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>7. Direct Orders Test (Debug)</h2>
+        <button onclick="testDirectOrders()">Test Direct DataKazina Orders</button>
+        <div id="direct-orders-result" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>8. Real Prices Test</h2>
+        <button onclick="testRealPrices()">Test Real Prices from DataKazina</button>
+        <button onclick="clearPriceCache()">Clear Price Cache & Refresh</button>
+        <div id="real-prices-result" class="result"></div>
+    </div>
+
+    <script>
+        async function makeRequest(url, method = 'GET', body = null) {
+            try {
+                const options = {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                };
+                
+                if (body) {
+                    options.body = JSON.stringify(body);
+                }
+                
+                const response = await fetch(url, options);
+                const text = await response.text();
+                
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch (e) {
+                    data = { rawResponse: text };
+                }
+                
+                return {
+                    ok: response.ok,
+                    status: response.status,
+                    data: data,
+                    rawText: text
+                };
+            } catch (error) {
+                return {
+                    ok: false,
+                    error: error.message,
+                    rawText: ''
+                };
+            }
+        }
+
+        function displayResult(elementId, result, isSuccess = true) {
+            const element = document.getElementById(elementId);
+            element.className = `result ${isSuccess ? 'success' : 'error'}`;
+            element.textContent = JSON.stringify(result, null, 2);
+        }
+
+        async function testBasicConnectivity() {
+            const result = await makeRequest('/api/debug/datakazina-test', 'POST');
+            displayResult('basic-result', result, result.ok);
+        }
+
+        async function testDirectAPI() {
+            const result = await makeRequest('/api/test-direct-api', 'POST');
+            displayResult('direct-result', result, result.ok);
+        }
+
+        async function testSimplePurchase() {
+            const payload = {
+                recipientMsisdn: document.getElementById('phone').value,
+                networkId: parseInt(document.getElementById('networkId').value),
+                sharedBundle: parseInt(document.getElementById('sharedBundle').value),
+                price: parseFloat(document.getElementById('price').value),
+                dataAmount: document.getElementById('dataAmount').value
+            };
+            
+            const result = await makeRequest('/api/test-simple-purchase', 'POST', payload);
+            displayResult('purchase-result', result, result.ok);
+        }
+
+        async function testNetworks() {
+            const result = await makeRequest('/api/datakazina?action=fetch-networks');
+            displayResult('networks-result', result, result.ok);
+        }
+
+        async function testPackages() {
+            const networkId = document.getElementById('packageNetworkId').value;
+            const result = await makeRequest(`/api/datakazina?action=fetch-packages&network_id=${networkId}`);
+            displayResult('packages-result', result, result.ok);
+        }
+
+        async function testAdminOrders() {
+            const result = await makeRequest('/api/admin/test-orders-display');
+            displayResult('admin-orders-result', result, result.ok);
+        }
+
+        async function testDirectOrders() {
+            const result = await makeRequest('/api/admin/direct-orders-test');
+            displayResult('direct-orders-result', result, result.ok);
+        }
+
+        async function testRealPrices() {
+            const result = await makeRequest('/api/test/real-prices');
+            displayResult('real-prices-result', result, result.ok);
+        }
+
+        async function clearPriceCache() {
+            const result = await makeRequest('/api/test/real-prices', 'POST');
+            displayResult('real-prices-result', result, result.ok);
+        }
+
+        // Auto-test on page load
+        window.onload = function() {
+            console.log('DataKazina API Test page loaded. Click buttons to test API endpoints.');
+        };
+    </script>
+</body>
+</html>
