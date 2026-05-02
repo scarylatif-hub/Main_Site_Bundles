@@ -21,8 +21,10 @@ import {
   TrendingUp,
   Edit,
   Eye,
+  Wallet,
 } from "lucide-react";
 import { WithdrawalDialog } from "@/components/reseller/withdrawal-dialog";
+import { MoveToWalletDialog } from "@/components/reseller/move-to-wallet-dialog";
 
 type StoreStats = {
   totalEarnings: number;
@@ -174,16 +176,16 @@ export default function ResellerDashboard() {
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
-                <p className="text-sm font-medium">Wallet Balance</p>
+                <p className="text-sm font-medium">Available Earnings</p>
               </div>
               <p className="text-xl font-bold">
-                ₵{loadingStats ? "..." : stats.walletBalance.toFixed(2)}
+                ₵{loadingStats ? "..." : stats.totalEarnings.toFixed(2)}
               </p>
               <p className="text-xs text-muted-foreground">
-                Available for withdrawal
+                Available for withdrawal (from store profits)
               </p>
               {!loadingStats && (
-                <WithdrawalDialog walletBalance={stats.walletBalance} />
+                <WithdrawalDialog walletBalance={stats.totalEarnings} />
               )}
             </div>
 
@@ -195,20 +197,23 @@ export default function ResellerDashboard() {
               <p className="text-xl font-bold">
                 ₵{loadingStats ? "..." : stats.totalEarnings.toFixed(2)}
               </p>
-              <p className="text-xs text-muted-foreground">Lifetime earnings</p>
+              <p className="text-xs text-muted-foreground">Lifetime earnings from store</p>
             </div>
 
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <Package className="h-4 w-4 text-muted-foreground" />
-                <p className="text-sm font-medium">Total Packages</p>
+                <Wallet className="h-4 w-4 text-muted-foreground" />
+                <p className="text-sm font-medium">Wallet Balance</p>
               </div>
               <p className="text-xl font-bold">
-                {loadingStats ? "..." : stats.totalPackages}
+                ₵{loadingStats ? "..." : stats.walletBalance.toFixed(2)}
               </p>
               <p className="text-xs text-muted-foreground">
-                Available packages
+                Main site balance (for purchases)
               </p>
+              {!loadingStats && stats.totalEarnings > 0 && (
+                <MoveToWalletDialog availableEarnings={stats.totalEarnings} />
+              )}
             </div>
 
             <div className="space-y-1">

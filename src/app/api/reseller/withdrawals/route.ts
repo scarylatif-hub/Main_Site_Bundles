@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { amount, momoNumber } = body;
+  const { amount, momoNumber, momoName } = body;
 
   // Validate amount
   const withdrawalAmount = Number(amount);
@@ -52,15 +52,45 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
   }
 
-  // Check wallet balance
-  const currentBalance = Number(profile.wallet_balance || 0);
-  if (withdrawalAmount > currentBalance) {
-    return NextResponse.json({ error: "Insufficient balance" }, { status: 400 });
+  // Calculate total earnings from completed store orders
+  const { data: profitData } = await admin
+    .from("orders")
+    .select("reseller_profit")
+    .eq("store_id", user.id)
+    .eq("status", "completed");
+
+  let totalEarnings = 0;
+  if (profitData) {
+    totalEarnings = profitData.reduce((sum, order) => sum + (order.reseller_profit || 0), 0);
   }
 
-  // Validate Mobile Money number
+  // Calculate already withdrawn amount
+  const { data: withdrawnData } = await admin
+    .from("earnings_to_wallet_transfers")
+    .select("amount")
+    .eq("user_id", user.id)
+    .eq("status", "completed")
+    .eq("method", "momo");
+
+  let withdrawnAmount = 0;
+  if (withdrawnData) {
+    withdrawnAmount = withdrawnData.reduce((sum, withdrawal) => sum + withdrawal.amount, 0);
+  }
+
+  // Available earnings = Total earnings - Already withdrawn
+  const availableEarnings = totalEarnings - withdrawnAmount;
+
+  if (withdrawalAmount > availableEarnings) {
+    return NextResponse.json({ error: "Insufficient available earnings" }, { status: 400 });
+  }
+
+  // Validate Mobile Money details
   if (!momoNumber) {
     return NextResponse.json({ error: "Mobile money number required" }, { status: 400 });
+  }
+
+  if (!momoName || momoName.trim().length < 2) {
+    return NextResponse.json({ error: "Mobile money name required" }, { status: 400 });
   }
 
   const phoneRegex = /^(0|233)\d{9}$/;
@@ -70,15 +100,19 @@ export async function POST(req: NextRequest) {
 
   try {
     // Create withdrawal record
+    const withdrawalReference = `WD${Date.now()}`;
     const { data: withdrawal, error: withdrawalError } = await admin
-      .from("withdrawals")
+      .from("earnings_to_wallet_transfers")
       .insert({
         user_id: user.id,
         amount: withdrawalAmount,
         method: "momo",
         momo_number: momoNumber,
+        momo_name: momoName.trim(),
         status: "pending",
+        reference: withdrawalReference,
         account_name: profile.full_name || "",
+        source: "earnings",
       })
       .select()
       .single();
@@ -88,35 +122,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Failed to create withdrawal request" }, { status: 500 });
     }
 
-    // Deduct from wallet immediately
-    const newBalance = currentBalance - withdrawalAmount;
-    const { error: updateError } = await admin
-      .from("profiles")
-      .update({ wallet_balance: newBalance })
-      .eq("id", user.id);
-
-    if (updateError) {
-      console.error("Wallet update error:", updateError);
-      return NextResponse.json({ error: "Failed to update wallet" }, { status: 500 });
-    }
-
     // Send ntfy notification for manual processing
     const ntfyMessage = `
-New Withdrawal Request - ACTION REQUIRED
------------------------------------------
-Amount: GHS ${withdrawalAmount.toFixed(2)}
-Mobile Money Number: ${momoNumber}
+NEW WITHDRAWAL REQUEST - MANUAL PROCESSING REQUIRED
+==================================================
+📱 MTN MOBILE MONEY WITHDRAWAL
+
+💰 Amount: GHS ${withdrawalAmount.toFixed(2)}
+👤 MoMo Name: ${momoName.trim()}
+📞 MoMo Number: ${momoNumber}
+🔗 Reference: ${withdrawalReference}
+
+🏪 Store Details:
 Store Owner: ${profile.full_name || "N/A"}
 Email: ${profile.email || "N/A"}
 Phone: ${profile.phone_number || "N/A"}
 Withdrawal ID: ${withdrawal.id}
-Created: ${new Date().toISOString()}
 
-Please manually send the money to the provided Mobile Money number and mark this withdrawal as completed in the admin panel.
+📊 Earnings Summary:
+Total Earnings: GHS ${totalEarnings.toFixed(2)}
+Available Earnings: GHS ${availableEarnings.toFixed(2)}
+Amount Requested: GHS ${withdrawalAmount.toFixed(2)}
+
+⏰ Created: ${new Date().toISOString()}
+
+🔴 ACTION REQUIRED:
+Please manually send GHS ${withdrawalAmount.toFixed(2)} to the MTN MoMo account above and mark this withdrawal as completed in the admin panel.
     `.trim();
 
     await sendNtfyNotification(
-      `Withdrawal Request: GHS ${withdrawalAmount.toFixed(2)}`,
+      `🚀 Withdrawal: GHS ${withdrawalAmount.toFixed(2)} - ${momoName.trim()}`,
       ntfyMessage
     );
 
@@ -155,7 +190,7 @@ export async function GET(req: NextRequest) {
 
   // Get withdrawal history
   const { data: withdrawals, error } = await admin
-    .from("withdrawals")
+    .from("earnings_to_wallet_transfers")
     .select("*")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })

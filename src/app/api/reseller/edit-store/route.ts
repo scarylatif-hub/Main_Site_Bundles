@@ -45,14 +45,19 @@ export async function PATCH(req: NextRequest) {
 
       if (uploadError) {
         console.error("Logo upload error:", uploadError);
-        return NextResponse.json({ error: "Failed to upload logo" }, { status: 500 });
+        // If bucket doesn't exist, continue without logo upload
+        if (uploadError.message?.includes("Bucket not found")) {
+          console.warn("store-logos bucket not found, skipping logo upload");
+        } else {
+          return NextResponse.json({ error: "Failed to upload logo" }, { status: 500 });
+        }
+      } else {
+        const { data: publicUrlData } = admin.storage
+          .from("store-logos")
+          .getPublicUrl(filePath);
+
+        logoUrl = publicUrlData.publicUrl;
       }
-
-      const { data: publicUrlData } = admin.storage
-        .from("store-logos")
-        .getPublicUrl(filePath);
-
-      logoUrl = publicUrlData.publicUrl;
     } catch (error) {
       console.error("Logo upload error:", error);
       return NextResponse.json({ error: "Failed to upload logo" }, { status: 500 });
@@ -63,13 +68,11 @@ export async function PATCH(req: NextRequest) {
   const updateData: any = {
     store_name: storeName,
     store_description: description,
-    theme_color: themeColor,
-    contact_number: contactNumber,
-    whatsapp_link: whatsappLink,
+    store_theme_color: themeColor,
   };
 
   if (logoUrl) {
-    updateData.store_logo = logoUrl;
+    updateData.store_logo_url = logoUrl;
   }
 
   const { error: updateError } = await admin

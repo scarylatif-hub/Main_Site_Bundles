@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
 
   // Get all withdrawals with user info
   const { data: withdrawals, error } = await admin
-    .from("withdrawals")
+    .from("earnings_to_wallet_transfers")
     .select(`
       *,
       profiles:user_id (
@@ -80,7 +80,7 @@ export async function PATCH(req: NextRequest) {
   try {
     // Get withdrawal details
     const { data: withdrawal, error: fetchError } = await admin
-      .from("withdrawals")
+      .from("earnings_to_wallet_transfers")
       .select("*")
       .eq("id", withdrawalId)
       .single();
@@ -95,7 +95,7 @@ export async function PATCH(req: NextRequest) {
 
     // Update withdrawal status
     const { error: updateError } = await admin
-      .from("withdrawals")
+      .from("earnings_to_wallet_transfers")
       .update({ 
         status,
         reference: reference || null,

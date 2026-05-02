@@ -1,34 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useState, useEffect, useMemo } from "react";
 import { toast } from "@/hooks/use-toast";
 import type { Profile } from "@/context/auth-context";
 
-// Load Paystack script dynamically
-declare global {
-  interface Window {
-    PaystackPop: any;
-  }
-}
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 type Package = {
   id: number;
@@ -39,7 +15,6 @@ type Package = {
   selling_price: number;
   validity?: string;
   volume?: string;
-  bundle?: string;
 };
 
 type CustomerOrder = {
@@ -59,586 +34,1060 @@ interface StoreClientProps {
   packages: Package[];
 }
 
-// Network prefix mappings
-const NETWORK_PREFIXES = {
-  MTN: ["024", "025", "053", "054", "055", "059"],
-  VODAFONE: ["020", "050"],
-  AIRTELTIGO: ["026", "027", "056", "057"],
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const NETWORK_PREFIXES: Record<string, string[]> = {
+  MTN:       ["024", "025", "053", "054", "055", "059"],
+  TELECEL:   ["020", "050"],
+  AIRTELTIGO:["026", "027", "056", "057"],
 };
 
-const NETWORK_NAME_MAP: Record<number, string> = {
-  1: "AirtelTigo",
-  2: "Telecel",
-  3: "MTN",
-  4: "AirtelTigo",
-  5: "MTN AFA",
+const NETWORK_MAP: Record<number, { label: string; color: string; bg: string; dot: string }> = {
+  1: { label: "AirtelTigo", color: "#E8001C", bg: "#fff1f2", dot: "#E8001C" },
+  2: { label: "Telecel",    color: "#CC0000", bg: "#fff1f1", dot: "#CC0000" },
+  3: { label: "MTN",        color: "#FFCC00", bg: "#fffbeb", dot: "#d97706" },
+  4: { label: "AirtelTigo", color: "#E8001C", bg: "#fff1f2", dot: "#E8001C" },
+  5: { label: "MTN AFA",    color: "#FFCC00", bg: "#fffbeb", dot: "#d97706" },
 };
 
-const ALLOWED_NETWORKS = [2, 3, 4]; // Telecel, MTN, AirtelTigo (DataKazina IDs)
+const ALLOWED_NETWORKS = [1, 2, 3];
 
-export default function StoreClient({
-  storeOwner,
-  packages,
-}: StoreClientProps) {
+declare global { interface Window { PaystackPop: any; } }
+
+// ── Cookie helpers ────────────────────────────────────────────────────────────
+
+function setCookie(name: string, value: string, days: number) {
+  const e = new Date();
+  e.setTime(e.getTime() + days * 864e5);
+  document.cookie = `${name}=${value};expires=${e.toUTCString()};path=/`;
+}
+function getCookie(name: string): string | null {
+  const eq = `${name}=`;
+  for (let c of document.cookie.split(";")) {
+    c = c.trim();
+    if (c.startsWith(eq)) return c.slice(eq.length);
+  }
+  return null;
+}
+
+// ── Network detection ─────────────────────────────────────────────────────────
+
+function detectNetwork(phone: string): string | null {
+  const p = phone.replace(/\s/g, "").slice(0, 3);
+  for (const [net, prefixes] of Object.entries(NETWORK_PREFIXES)) {
+    if (prefixes.includes(p)) return net;
+  }
+  return null;
+}
+
+function formatPhone(raw: string): string {
+  let v = raw.replace(/\s/g, "").replace(/[^\d+]/g, "");
+  if (v.startsWith("+233")) v = "0" + v.slice(4);
+  v = v.replace(/\+/g, "");
+  if (v.length > 0 && !v.startsWith("0")) v = "0" + v;
+  return v.slice(0, 10);
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+export default function StoreClient({ storeOwner, packages }: StoreClientProps) {
+  const [phone, setPhone]               = useState("");
+  const [name, setName]                 = useState("");
   const [selectedNetwork, setSelectedNetwork] = useState<number | null>(null);
-  const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
-  const [phoneNumber, setPhoneNumber] = useState("");
-  const [nickname, setNickname] = useState("");
-  const [purchasing, setPurchasing] = useState(false);
-  const [activeTab, setActiveTab] = useState<"buy" | "history">("buy");
-  const [orderHistory, setOrderHistory] = useState<CustomerOrder[]>([]);
-  const [detectedNetwork, setDetectedNetwork] = useState<string | null>(null);
-  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [selectedPkg, setSelectedPkg]   = useState<Package | null>(null);
+  const [detectedNet, setDetectedNet]   = useState<string | null>(null);
+  const [purchasing, setPurchasing]     = useState(false);
+  const [tab, setTab]                   = useState<"buy" | "orders">("buy");
+  const [orders, setOrders]             = useState<CustomerOrder[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [showConfirm, setShowConfirm]   = useState(false);
+  const [step, setStep]                 = useState<"phone" | "packages">("phone");
 
-  // Load customer info from cookies on mount
+  // Theme from store owner
+  const themeColor = (storeOwner as any).store_theme_color || "#6366f1";
+  const logoUrl    = (storeOwner as any).store_logo_url || null;
+  const storeName  = (storeOwner as any).store_name || storeOwner.full_name || "Data Store";
+  const storeDesc  = (storeOwner as any).store_description || "Fast data bundles, delivered instantly.";
+
   useEffect(() => {
     const savedPhone = getCookie("store_phone");
-    const savedNickname = getCookie("store_nickname");
-    if (savedPhone) {
-      setPhoneNumber(savedPhone);
-      detectNetworkFromPhone(savedPhone);
-    }
-    if (savedNickname) setNickname(savedNickname);
-
-    // Load order history if phone is saved
-    if (savedPhone) {
-      loadOrderHistory(savedPhone);
-    }
+    const savedName  = getCookie("store_nickname");
+    if (savedPhone) { setPhone(savedPhone); handlePhoneDetect(savedPhone); setStep("packages"); }
+    if (savedName)  setName(savedName);
   }, []);
 
-  const networks = Array.from(
-    new Set(packages.map((p) => p.network_id)),
-  ).filter((n) => ALLOWED_NETWORKS.includes(n));
-  const filteredPackages = selectedNetwork
-    ? packages.filter((p) => p.network_id === selectedNetwork)
-    : packages.filter((p) => ALLOWED_NETWORKS.includes(p.network_id));
+  function handlePhoneDetect(val: string) {
+    const net = detectNetwork(val);
+    setDetectedNet(net);
+    if (net === "MTN")        setSelectedNetwork(3);
+    else if (net === "TELECEL")    setSelectedNetwork(2);
+    else if (net === "AIRTELTIGO") setSelectedNetwork(1);
+  }
 
-  const networkName = (networkId: number) => {
-    return NETWORK_NAME_MAP[networkId] || `Network ${networkId}`;
-  };
+  function handlePhoneChange(val: string) {
+    const formatted = formatPhone(val);
+    setPhone(formatted);
+    handlePhoneDetect(formatted);
+  }
 
-  const detectNetworkFromPhone = (phone: string) => {
-    const cleanPhone = phone.replace(/\s/g, "");
-    if (cleanPhone.length >= 3) {
-      const prefix = cleanPhone.substring(0, 3);
-      if (NETWORK_PREFIXES.MTN.includes(prefix)) {
-        setDetectedNetwork("MTN Ghana");
-        setSelectedNetwork(3); // DataKazina ID for MTN
-        return;
-      }
-      if (NETWORK_PREFIXES.VODAFONE.includes(prefix)) {
-        setDetectedNetwork("Vodafone Ghana");
-        setSelectedNetwork(2); // DataKazina ID for Telecel (formerly Vodafone)
-        return;
-      }
-      if (NETWORK_PREFIXES.AIRTELTIGO.includes(prefix)) {
-        setDetectedNetwork("AirtelTigo");
-        setSelectedNetwork(4); // DataKazina ID for AirtelTigo
-        return;
-      }
+  function handlePhoneContinue() {
+    if (phone.length < 10) {
+      toast({ title: "Invalid number", description: "Enter a valid 10-digit Ghana phone number.", variant: "destructive" });
+      return;
     }
-    setDetectedNetwork(null);
-  };
+    setCookie("store_phone", phone, 30);
+    if (name) setCookie("store_nickname", name, 30);
+    setStep("packages");
+  }
 
-  const formatPhoneNumber = (value: string) => {
-    // Remove all spaces and special characters except digits
-    let cleaned = value.replace(/\s/g, "").replace(/[^\d+]/g, "");
+  const networks = useMemo(() =>
+    [...new Set(packages.map(p => p.network_id))].filter(n => ALLOWED_NETWORKS.includes(n)),
+    [packages]
+  );
 
-    // Convert +233 to 0
-    if (cleaned.startsWith("+233")) {
-      cleaned = "0" + cleaned.substring(4);
-    }
+  const visiblePackages = useMemo(() =>
+    packages.filter(p =>
+      ALLOWED_NETWORKS.includes(p.network_id) &&
+      (selectedNetwork === null || p.network_id === selectedNetwork)
+    ),
+    [packages, selectedNetwork]
+  );
 
-    // Remove any remaining + signs
-    cleaned = cleaned.replace(/\+/g, "");
-
-    // Ensure it starts with 0
-    if (cleaned.length > 0 && !cleaned.startsWith("0")) {
-      cleaned = "0" + cleaned;
-    }
-
-    // Limit to 10 digits
-    return cleaned.substring(0, 10);
-  };
-
-  const handlePhoneChange = (value: string) => {
-    const formatted = formatPhoneNumber(value);
-    setPhoneNumber(formatted);
-    detectNetworkFromPhone(formatted);
-  };
-
-  const loadOrderHistory = async (phone: string) => {
+  async function loadOrders(p: string) {
+    if (!p) return;
+    setLoadingOrders(true);
     try {
-      const res = await fetch(
-        `/api/store/${storeOwner.reseller_slug}/orders?phone=${phone}`,
-      );
+      const res = await fetch(`/api/store/${storeOwner.reseller_slug}/orders?phone=${p}`);
       const data = await res.json();
-      if (data.success) {
-        setOrderHistory(data.orders || []);
-      }
-    } catch (error) {
-      console.error("Error loading order history:", error);
-    }
-  };
+      if (data.success) setOrders(data.orders || []);
+    } catch { /* silent */ }
+    finally { setLoadingOrders(false); }
+  }
 
-  const handlePurchase = () => {
-    if (!selectedPackage || !phoneNumber) return;
-    setShowConfirmation(true);
-  };
-
-  const handleConfirmPurchase = async () => {
-    if (!selectedPackage || !phoneNumber) return;
-
-    // Save customer info to cookies
-    setCookie("store_phone", phoneNumber, 30);
-    if (nickname) setCookie("store_nickname", nickname, 30);
-
-    setShowConfirmation(false);
+  async function handlePurchase() {
+    if (!selectedPkg || !phone) return;
+    setShowConfirm(false);
     setPurchasing(true);
 
+    const email = name?.includes("@") ? name : `${phone}@store.bundleghana.com`;
+    const reference = `store-${storeOwner.id}-${Date.now()}`;
+
     try {
-      const cleanNickname = nickname?.trim();
-      const cleanPhone = phoneNumber.replace(/\D/g, "");
-
-      const email =
-        cleanNickname && cleanNickname.length > 0
-          ? cleanNickname.includes("@")
-            ? cleanNickname
-            : `${cleanNickname}@ghana.com`
-          : `${cleanPhone}@ghana.com`;
-      const reference = `store-${storeOwner.id}-${Date.now()}`;
-
-      const initResponse = await fetch("/api/paystack/guest/initialize", {
+      const init = await fetch("/api/paystack/guest/initialize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          amount: selectedPackage.selling_price,
+          amount: selectedPkg.selling_price,
           email,
           reference,
           metadata: {
-            store_id: storeOwner.id,
-            package_id: selectedPackage.id,
-            network_id: selectedPackage.network_id,
-            phone_number: phoneNumber,
-            customer_name: nickname,
+            store_id:     storeOwner.id,
+            package_id:   selectedPkg.id,
+            network_id:   selectedPkg.network_id,
+            phone_number: phone,
+            customer_name: name,
           },
         }),
       });
 
-      if (!initResponse.ok) {
-        throw new Error("Failed to initialize payment");
-      }
+      if (!init.ok) throw new Error("Failed to initialize payment");
 
-      const initData = await initResponse.json();
+      const pk = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY;
+      if (!pk) throw new Error("Payment not configured");
 
-      // Open Paystack popup
-      const paystackPublicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY;
-      if (!paystackPublicKey) {
-        throw new Error("Payment service not configured");
-      }
-
-      // Load Paystack script if not already loaded
       if (!window.PaystackPop) {
-        const script = document.createElement("script");
-        script.src = "https://js.paystack.co/v1/inline.js";
-        script.async = true;
-        await new Promise((resolve, reject) => {
-          script.onload = resolve;
-          script.onerror = reject;
-          document.head.appendChild(script);
+        await new Promise<void>((res, rej) => {
+          const s = document.createElement("script");
+          s.src = "https://js.paystack.co/v1/inline.js";
+          s.onload = () => res();
+          s.onerror = () => rej(new Error("Paystack load failed"));
+          document.head.appendChild(s);
         });
       }
 
-      // Open Paystack popup using the inline method
-      const paystackHandler = (window as any).PaystackPop.setup({
-        key: paystackPublicKey,
-        email: email,
-        amount: Math.round(selectedPackage.selling_price * 100), // Convert to kobo
-        ref: reference,
+      const handler = window.PaystackPop.setup({
+        key:      pk,
+        email,
+        amount:   Math.round(selectedPkg.selling_price * 100),
+        ref:      reference,
         currency: "GHS",
         onClose: () => {
           setPurchasing(false);
-          toast({
-            title: "Payment Cancelled",
-            description: "You cancelled the payment",
-            variant: "destructive",
-          });
+          toast({ title: "Payment cancelled", variant: "destructive" });
         },
-        callback: function (response: any) {
-          // Payment successful, now call the API to process the order
+        callback: (response: any) => {
           fetch("/api/guest/orders", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              store_id: storeOwner.id,
-              package_id: selectedPackage.id,
-              network_id: selectedPackage.network_id,
-              phone_number: phoneNumber,
-              email: nickname,
-              amount: selectedPackage.selling_price,
+              store_id:          storeOwner.id,
+              package_id:        selectedPkg.id,
+              network_id:        selectedPkg.network_id,
+              phone_number:      phone,
+              email:             name,
+              amount:            selectedPkg.selling_price,
               payment_reference: reference,
             }),
           })
-            .then((res) => {
-              if (!res.ok) {
-                return res.json().then((data) => {
-                  throw new Error(
-                    data.error || "Purchase failed after payment",
-                  );
-                });
-              }
-              return res.json();
-            })
-            .then((data) => {
-              // Handle retry_pending status as success (order is being processed)
-              if (data.retry_pending) {
-                toast({
-                  title: "Successful Purchase",
-                  description: "Data will be sent shortly.",
-                  variant: "default",
-                });
-                setSelectedPackage(null);
-                loadOrderHistory(phoneNumber);
-                return;
-              }
-
-              // Handle actual errors
-              if (data.error) {
-                throw new Error(data.error || "Purchase failed after payment");
-              }
-
-              // Success case
-              toast({
-                title: "Purchase Successful",
-                description: "Data will be sent shortly.",
-                variant: "default",
-              });
-              setSelectedPackage(null);
-              loadOrderHistory(phoneNumber);
-            })
-            .catch((error) => {
-              toast({
-                title: "Purchase Failed",
-                description:
-                  error instanceof Error ? error.message : "An error occurred",
-                variant: "destructive",
-              });
-            })
-            .finally(() => {
-              setPurchasing(false);
-            });
+          .then(r => r.json())
+          .then(data => {
+            if (data.error) throw new Error(data.error);
+            toast({ title: "🎉 Data Sent!", description: `${selectedPkg.data_amount} is on its way to ${phone}.` });
+            setSelectedPkg(null);
+            loadOrders(phone);
+          })
+          .catch(err => {
+            toast({ title: "Purchase failed", description: err.message, variant: "destructive" });
+          })
+          .finally(() => setPurchasing(false));
         },
       });
 
-      paystackHandler.openIframe();
-    } catch (error) {
-      toast({
-        title: "Payment Failed",
-        description:
-          error instanceof Error ? error.message : "Failed to process payment",
-        variant: "destructive",
-      });
+      handler.openIframe();
+    } catch (err) {
+      toast({ title: "Payment failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
       setPurchasing(false);
     }
-  };
+  }
 
-  const handleTabChange = (tab: "buy" | "history") => {
-    setActiveTab(tab);
-    if (tab === "history" && phoneNumber) {
-      loadOrderHistory(phoneNumber);
-    }
-  };
+  const netInfo = (id: number) => NETWORK_MAP[id] ?? { label: `Net ${id}`, color: "#6366f1", bg: "#f0f0ff", dot: "#6366f1" };
+  const statusColor = (s: string) =>
+    s === "completed" ? "#16a34a" : s === "processing" ? "#d97706" : "#dc2626";
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b bg-white">
-        <div className="container mx-auto px-4 py-4">
-          <h1 className="text-2xl font-bold">{storeOwner.store_name}</h1>
-          <p className="text-muted-foreground">Data Bundle Store</p>
-        </div>
-      </header>
+    <>
+      {/* ── CSS variables & global styles ── */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Cabinet+Grotesk:wght@400;500;700;800&family=Lora:ital@0;1&display=swap');
 
-      <main className="container mx-auto px-4 py-8">
-        <Tabs
-          value={activeTab}
-          onValueChange={(v) => handleTabChange(v as "buy" | "history")}
-        >
-          <TabsList className="grid w-full max-w-md grid-cols-2">
-            <TabsTrigger value="buy">Buy Data</TabsTrigger>
-            <TabsTrigger value="history">My Orders</TabsTrigger>
-          </TabsList>
+        :root {
+          --brand: ${themeColor};
+          --brand-faint: ${themeColor}18;
+          --brand-light: ${themeColor}30;
+        }
 
-          <TabsContent value="buy">
-            <div className="grid md:grid-cols-3 gap-6 mt-6">
-              <div>
-                <Card className="sticky top-4">
-                  <CardHeader>
-                    <CardTitle>Your Details</CardTitle>
-                    <CardDescription>
-                      Enter your phone number to get started
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div>
-                      <Label htmlFor="phone">Phone Number *</Label>
-                      <Input
-                        id="phone"
-                        type="tel"
-                        placeholder="05XXXXXXXX"
-                        value={phoneNumber}
-                        onChange={(e) => handlePhoneChange(e.target.value)}
-                      />
-                      {detectedNetwork && (
-                        <p className="text-sm text-green-600 mt-1">
-                          📱 {detectedNetwork}
-                        </p>
-                      )}
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Enter number (e.g., 0595919802 or +233595919802)
-                      </p>
-                    </div>
+        .store-root {
+          font-family: 'Cabinet Grotesk', sans-serif;
+          min-height: 100vh;
+          background: #f8f7f5;
+          color: #1a1a1a;
+        }
 
-                    <div>
-                      <Label htmlFor="nickname">Your Name (Optional)</Label>
-                      <Input
-                        id="nickname"
-                        type="text"
-                        placeholder="Enter your name"
-                        value={nickname}
-                        onChange={(e) => setNickname(e.target.value)}
-                      />
-                      <p className="text-xs text-muted-foreground mt-1">
-                        We'll use this to track your orders
-                      </p>
-                    </div>
+        /* Header */
+        .store-header {
+          background: #fff;
+          border-bottom: 1px solid #ebebeb;
+          padding: 0 1.5rem;
+          position: sticky;
+          top: 0;
+          z-index: 50;
+        }
+        .store-header-inner {
+          max-width: 900px;
+          margin: 0 auto;
+          height: 64px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+        }
+        .store-logo-wrap {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+        }
+        .store-logo-img {
+          width: 40px;
+          height: 40px;
+          border-radius: 10px;
+          object-fit: cover;
+          border: 2px solid var(--brand-light);
+        }
+        .store-logo-initials {
+          width: 40px;
+          height: 40px;
+          border-radius: 10px;
+          background: var(--brand-faint);
+          border: 2px solid var(--brand-light);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 800;
+          font-size: 1rem;
+          color: var(--brand);
+        }
+        .store-name-block h1 {
+          font-size: 1rem;
+          font-weight: 800;
+          line-height: 1.2;
+          margin: 0;
+        }
+        .store-name-block p {
+          font-size: 0.72rem;
+          color: #888;
+          margin: 0;
+          font-style: italic;
+          font-family: 'Lora', serif;
+        }
 
-                    {selectedPackage && (
-                      <>
-                        <div className="border rounded-lg p-3 bg-muted/50">
-                          <p className="font-medium">{selectedPackage.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {selectedPackage.data_amount}
-                          </p>
-                          <p className="font-bold text-lg mt-2">
-                            GHS {selectedPackage.selling_price.toFixed(2)}
-                          </p>
-                        </div>
+        /* Tab nav */
+        .store-tabs {
+          display: flex;
+          gap: 0.25rem;
+          background: #f3f2f0;
+          border-radius: 10px;
+          padding: 3px;
+        }
+        .store-tab {
+          padding: 0.35rem 0.9rem;
+          border-radius: 8px;
+          border: none;
+          cursor: pointer;
+          font-family: inherit;
+          font-weight: 600;
+          font-size: 0.8rem;
+          transition: all 0.18s ease;
+          background: transparent;
+          color: #888;
+        }
+        .store-tab.active {
+          background: #fff;
+          color: #1a1a1a;
+          box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+        }
 
-                        <Button
-                          className="w-full"
-                          onClick={handlePurchase}
-                          disabled={!phoneNumber || purchasing}
-                        >
-                          {purchasing ? "Processing..." : "Purchase"}
-                        </Button>
-                      </>
-                    )}
-                  </CardContent>
-                </Card>
-              </div>
-              <div className="md:col-span-2">
-                {!phoneNumber ? (
-                  <Card>
-                    <CardContent className="p-12 text-center">
-                      <p className="text-muted-foreground">
-                        Enter your phone number to view available packages
-                      </p>
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Packages</CardTitle>
-                      <CardDescription>
-                        Select a network to view available packages
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex gap-2 mb-4 flex-wrap">
-                        {networks.map((networkId) => (
-                          <Button
-                            key={networkId}
-                            variant={
-                              selectedNetwork === networkId
-                                ? "default"
-                                : "outline"
-                            }
-                            onClick={() => setSelectedNetwork(networkId)}
-                          >
-                            {networkName(networkId)}
-                          </Button>
-                        ))}
-                      </div>
+        /* Main layout */
+        .store-main {
+          max-width: 900px;
+          margin: 0 auto;
+          padding: 2rem 1.5rem 4rem;
+        }
 
-                      <div className="grid gap-4">
-                        {filteredPackages.map((pkg) => (
-                          <Card
-                            key={pkg.id}
-                            className={`cursor-pointer transition-colors ${
-                              selectedPackage?.id === pkg.id
-                                ? "border-primary"
-                                : ""
-                            }`}
-                            onClick={() => setSelectedPackage(pkg)}
-                          >
-                            <CardContent className="p-4">
-                              <div className="flex justify-between items-start">
-                                <div className="flex-1">
-                                  <p className="font-medium text-lg">
-                                    {pkg.data_amount || pkg.volume || pkg.name}
-                                  </p>
-                                  <p className="text-sm text-muted-foreground">
-                                    {networkName(pkg.network_id)} •{" "}
-                                    {pkg.validity || "90 days"}
-                                  </p>
-                                </div>
-                                <div className="text-right ml-4">
-                                  <p className="font-bold text-lg">
-                                    GHS {pkg.selling_price.toFixed(2)}
-                                  </p>
-                                </div>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
+        /* ── Step: Phone entry ── */
+        .phone-card {
+          background: #fff;
+          border-radius: 20px;
+          padding: 2.5rem;
+          max-width: 440px;
+          margin: 2rem auto 0;
+          box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+        }
+        .phone-card h2 {
+          font-size: 1.5rem;
+          font-weight: 800;
+          margin: 0 0 0.35rem;
+        }
+        .phone-card .sub {
+          color: #888;
+          font-size: 0.875rem;
+          font-family: 'Lora', serif;
+          font-style: italic;
+          margin: 0 0 2rem;
+        }
+        .field-label {
+          display: block;
+          font-size: 0.8rem;
+          font-weight: 700;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+          color: #555;
+          margin-bottom: 0.5rem;
+        }
+        .field-input {
+          width: 100%;
+          border: 1.5px solid #e5e5e5;
+          border-radius: 12px;
+          padding: 0.75rem 1rem;
+          font-family: inherit;
+          font-size: 1rem;
+          font-weight: 500;
+          outline: none;
+          transition: border-color 0.15s;
+          box-sizing: border-box;
+          background: #fafafa;
+        }
+        .field-input:focus {
+          border-color: var(--brand);
+          background: #fff;
+        }
+        .net-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.35rem;
+          font-size: 0.78rem;
+          font-weight: 700;
+          padding: 0.3rem 0.7rem;
+          border-radius: 999px;
+          margin-top: 0.5rem;
+        }
+        .net-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+        }
+        .field-hint {
+          font-size: 0.75rem;
+          color: #aaa;
+          margin-top: 0.4rem;
+        }
+        .field-group {
+          margin-bottom: 1.25rem;
+        }
+        .btn-primary {
+          width: 100%;
+          padding: 0.85rem;
+          border-radius: 12px;
+          border: none;
+          cursor: pointer;
+          font-family: inherit;
+          font-weight: 800;
+          font-size: 1rem;
+          background: var(--brand);
+          color: #fff;
+          transition: opacity 0.15s, transform 0.1s;
+          margin-top: 0.5rem;
+        }
+        .btn-primary:hover { opacity: 0.88; }
+        .btn-primary:active { transform: scale(0.98); }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* ── Package browser ── */
+        .section-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 1.25rem;
+          gap: 1rem;
+          flex-wrap: wrap;
+        }
+        .section-title {
+          font-size: 1.1rem;
+          font-weight: 800;
+          margin: 0;
+        }
+        .back-btn {
+          background: none;
+          border: 1.5px solid #e5e5e5;
+          border-radius: 8px;
+          padding: 0.3rem 0.75rem;
+          font-family: inherit;
+          font-size: 0.8rem;
+          font-weight: 600;
+          cursor: pointer;
+          color: #555;
+          transition: border-color 0.15s;
+        }
+        .back-btn:hover { border-color: #aaa; }
+
+        /* Phone indicator */
+        .phone-pill {
+          display: flex;
+          align-items: center;
+          gap: 0.6rem;
+          background: #fff;
+          border: 1.5px solid #ebebeb;
+          border-radius: 14px;
+          padding: 0.6rem 1rem;
+          margin-bottom: 1.5rem;
+        }
+        .phone-pill-icon {
+          width: 32px;
+          height: 32px;
+          border-radius: 8px;
+          background: var(--brand-faint);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 1rem;
+        }
+        .phone-pill-info { flex: 1; }
+        .phone-pill-info strong {
+          font-size: 0.95rem;
+          font-weight: 700;
+          display: block;
+          line-height: 1.2;
+        }
+        .phone-pill-info span {
+          font-size: 0.75rem;
+          color: #888;
+        }
+        .phone-pill-change {
+          font-size: 0.75rem;
+          font-weight: 600;
+          color: var(--brand);
+          cursor: pointer;
+          text-decoration: underline;
+          background: none;
+          border: none;
+          font-family: inherit;
+        }
+
+        /* Network filter chips */
+        .net-chips {
+          display: flex;
+          gap: 0.5rem;
+          flex-wrap: wrap;
+          margin-bottom: 1.25rem;
+        }
+        .net-chip {
+          padding: 0.4rem 1rem;
+          border-radius: 999px;
+          border: 1.5px solid #e5e5e5;
+          background: #fff;
+          font-family: inherit;
+          font-size: 0.82rem;
+          font-weight: 700;
+          cursor: pointer;
+          transition: all 0.15s;
+          color: #555;
+        }
+        .net-chip:hover { border-color: #bbb; }
+        .net-chip.active {
+          border-color: var(--brand);
+          background: var(--brand-faint);
+          color: var(--brand);
+        }
+
+        /* Package grid */
+        .pkg-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+          gap: 0.875rem;
+        }
+        .pkg-card {
+          background: #fff;
+          border-radius: 16px;
+          border: 2px solid #ebebeb;
+          padding: 1.25rem 1rem 1rem;
+          cursor: pointer;
+          transition: all 0.18s ease;
+          position: relative;
+          overflow: hidden;
+        }
+        .pkg-card:hover {
+          border-color: var(--brand);
+          transform: translateY(-2px);
+          box-shadow: 0 6px 20px rgba(0,0,0,0.07);
+        }
+        .pkg-card.selected {
+          border-color: var(--brand);
+          background: var(--brand-faint);
+        }
+        .pkg-card.selected::after {
+          content: '✓';
+          position: absolute;
+          top: 0.6rem;
+          right: 0.75rem;
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          background: var(--brand);
+          color: #fff;
+          font-size: 0.7rem;
+          font-weight: 800;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .pkg-net-badge {
+          font-size: 0.7rem;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          margin-bottom: 0.6rem;
+          display: flex;
+          align-items: center;
+          gap: 0.3rem;
+        }
+        .pkg-size {
+          font-size: 1.75rem;
+          font-weight: 800;
+          line-height: 1;
+          margin-bottom: 0.15rem;
+        }
+        .pkg-validity {
+          font-size: 0.72rem;
+          color: #999;
+          margin-bottom: 0.75rem;
+          font-family: 'Lora', serif;
+          font-style: italic;
+        }
+        .pkg-price {
+          font-size: 1.1rem;
+          font-weight: 800;
+          color: var(--brand);
+        }
+
+        /* Checkout bar */
+        .checkout-bar {
+          position: fixed;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          background: #fff;
+          border-top: 1px solid #ebebeb;
+          padding: 1rem 1.5rem;
+          z-index: 40;
+          animation: slideUp 0.2s ease;
+        }
+        @keyframes slideUp {
+          from { transform: translateY(100%); }
+          to   { transform: translateY(0); }
+        }
+        .checkout-inner {
+          max-width: 900px;
+          margin: 0 auto;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+        }
+        .checkout-info strong {
+          display: block;
+          font-size: 1rem;
+          font-weight: 800;
+        }
+        .checkout-info span {
+          font-size: 0.8rem;
+          color: #888;
+        }
+        .checkout-price {
+          font-size: 1.25rem;
+          font-weight: 800;
+          color: var(--brand);
+        }
+        .btn-buy {
+          padding: 0.75rem 1.75rem;
+          border-radius: 12px;
+          border: none;
+          cursor: pointer;
+          font-family: inherit;
+          font-weight: 800;
+          font-size: 0.95rem;
+          background: var(--brand);
+          color: #fff;
+          transition: opacity 0.15s;
+          white-space: nowrap;
+        }
+        .btn-buy:hover { opacity: 0.88; }
+        .btn-buy:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Confirm modal */
+        .modal-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0,0,0,0.45);
+          backdrop-filter: blur(4px);
+          z-index: 100;
+          display: flex;
+          align-items: flex-end;
+          justify-content: center;
+          padding: 0 0 env(safe-area-inset-bottom, 0);
+          animation: fadeIn 0.15s ease;
+        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .modal-sheet {
+          background: #fff;
+          border-radius: 24px 24px 0 0;
+          padding: 1.5rem 1.5rem 2rem;
+          width: 100%;
+          max-width: 500px;
+          animation: sheetUp 0.22s cubic-bezier(0.34,1.56,0.64,1);
+        }
+        @keyframes sheetUp {
+          from { transform: translateY(40px); opacity: 0; }
+          to   { transform: translateY(0);   opacity: 1; }
+        }
+        .modal-handle {
+          width: 36px;
+          height: 4px;
+          background: #e5e5e5;
+          border-radius: 2px;
+          margin: 0 auto 1.5rem;
+        }
+        .modal-title {
+          font-size: 1.25rem;
+          font-weight: 800;
+          margin: 0 0 1.25rem;
+        }
+        .confirm-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 0.65rem 0;
+          border-bottom: 1px solid #f0f0f0;
+          font-size: 0.9rem;
+        }
+        .confirm-row:last-of-type { border-bottom: none; }
+        .confirm-row .label { color: #888; }
+        .confirm-row .value { font-weight: 700; }
+        .confirm-total {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 1rem 0 0.5rem;
+          font-size: 1.1rem;
+        }
+        .confirm-total .t-label { font-weight: 800; }
+        .confirm-total .t-price { font-size: 1.5rem; font-weight: 800; color: var(--brand); }
+        .modal-actions {
+          display: flex;
+          gap: 0.75rem;
+          margin-top: 1rem;
+        }
+        .btn-cancel {
+          flex: 1;
+          padding: 0.8rem;
+          border-radius: 12px;
+          border: 1.5px solid #e5e5e5;
+          background: #fff;
+          font-family: inherit;
+          font-weight: 700;
+          font-size: 0.95rem;
+          cursor: pointer;
+          color: #555;
+        }
+        .btn-confirm {
+          flex: 2;
+          padding: 0.8rem;
+          border-radius: 12px;
+          border: none;
+          background: var(--brand);
+          color: #fff;
+          font-family: inherit;
+          font-weight: 800;
+          font-size: 0.95rem;
+          cursor: pointer;
+          transition: opacity 0.15s;
+        }
+        .btn-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Orders list */
+        .orders-list { display: flex; flex-direction: column; gap: 0.75rem; }
+        .order-card {
+          background: #fff;
+          border-radius: 14px;
+          padding: 1rem 1.25rem;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+          border: 1.5px solid #ebebeb;
+        }
+        .order-left strong { display: block; font-size: 0.95rem; font-weight: 700; }
+        .order-left span { font-size: 0.78rem; color: #888; }
+        .order-right { text-align: right; }
+        .order-right strong { display: block; font-size: 0.95rem; font-weight: 800; }
+        .order-status {
+          font-size: 0.72rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+
+        /* Empty state */
+        .empty-state {
+          text-align: center;
+          padding: 4rem 1rem;
+          color: #bbb;
+        }
+        .empty-state .icon { font-size: 3rem; margin-bottom: 0.75rem; }
+        .empty-state p { font-size: 0.9rem; }
+
+        /* Spinner */
+        .spinner {
+          width: 18px; height: 18px;
+          border: 2px solid rgba(255,255,255,0.35);
+          border-top-color: #fff;
+          border-radius: 50%;
+          animation: spin 0.6s linear infinite;
+          display: inline-block;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        @media (max-width: 600px) {
+          .store-main { padding: 1.25rem 1rem 5rem; }
+          .phone-card { padding: 1.75rem 1.25rem; }
+          .pkg-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+      `}</style>
+
+      <div className="store-root">
+
+        {/* ── Header ── */}
+        <header className="store-header">
+          <div className="store-header-inner">
+            <div className="store-logo-wrap">
+              {logoUrl
+                ? <img src={logoUrl} alt={storeName} className="store-logo-img" />
+                : (
+                  <div className="store-logo-initials">
+                    {storeName.slice(0, 2).toUpperCase()}
+                  </div>
+                )
+              }
+              <div className="store-name-block">
+                <h1>{storeName}</h1>
+                <p>{storeDesc}</p>
               </div>
             </div>
-          </TabsContent>
 
-          <TabsContent value="history">
-            <Card className="mt-6">
-              <CardHeader>
-                <CardTitle>Your Order History</CardTitle>
-                <CardDescription>
-                  Track your past purchases from this store
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                {!phoneNumber ? (
-                  <p className="text-sm text-muted-foreground text-center py-8">
-                    Enter your phone number on the Buy Data tab to view your
-                    order history
-                  </p>
-                ) : orderHistory.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-8">
-                    No orders found for {phoneNumber}
-                  </p>
-                ) : (
-                  <div className="space-y-4">
-                    {orderHistory.map((order) => (
-                      <div key={order.id} className="border rounded-lg p-4">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <p className="font-medium">
-                              {order.package_name ||
-                                `Package ${order.package_id}`}
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                              {networkName(order.network_id)} •{" "}
-                              {order.data_amount || "N/A"}
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              {new Date(order.created_at).toLocaleString()}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p className="font-bold">
-                              GHS {order.amount.toFixed(2)}
-                            </p>
-                            <p className={`text-sm ${
-                              order.status === "completed" ? "text-green-600" :
-                              // order.status === "processing" ? "text-yellow-600" :
-                              "text-red-600"
-                            }`}>
-                              {order.status}
-                            </p>
-                          </div>
-                        </div>
+            <div className="store-tabs">
+              <button
+                className={`store-tab ${tab === "buy" ? "active" : ""}`}
+                onClick={() => setTab("buy")}
+              >Buy Data</button>
+              <button
+                className={`store-tab ${tab === "orders" ? "active" : ""}`}
+                onClick={() => { setTab("orders"); loadOrders(phone); }}
+              >My Orders</button>
+            </div>
+          </div>
+        </header>
+
+        {/* ── Main ── */}
+        <main className="store-main">
+
+          {/* ── BUY TAB ── */}
+          {tab === "buy" && (
+            <>
+              {/* Step 1: Enter phone */}
+              {step === "phone" && (
+                <div className="phone-card">
+                  <h2>Who are you buying for?</h2>
+                  <p className="sub">Enter the phone number to receive the data bundle.</p>
+
+                  <div className="field-group">
+                    <label className="field-label" htmlFor="phone">Phone Number *</label>
+                    <input
+                      id="phone"
+                      type="tel"
+                      inputMode="tel"
+                      className="field-input"
+                      placeholder="05XXXXXXXX"
+                      value={phone}
+                      onChange={e => handlePhoneChange(e.target.value)}
+                      autoComplete="tel"
+                    />
+                    {detectedNet && (
+                      <div
+                        className="net-badge"
+                        style={{
+                          background: NETWORK_PREFIXES[detectedNet] ? "#f0fdf4" : "#f5f5f5",
+                          color: "#16a34a",
+                        }}
+                      >
+                        <span className="net-dot" style={{ background: "#16a34a" }} />
+                        {detectedNet} detected
                       </div>
+                    )}
+                    <p className="field-hint">Ghana number e.g. 0244000000 or +233244000000</p>
+                  </div>
+
+                  <div className="field-group">
+                    <label className="field-label" htmlFor="cname">Your Name (Optional)</label>
+                    <input
+                      id="cname"
+                      type="text"
+                      className="field-input"
+                      placeholder="e.g. Kwame"
+                      value={name}
+                      onChange={e => setName(e.target.value)}
+                    />
+                    <p className="field-hint">Helps you track your orders later</p>
+                  </div>
+
+                  <button className="btn-primary" onClick={handlePhoneContinue}>
+                    Browse Packages →
+                  </button>
+                </div>
+              )}
+
+              {/* Step 2: Choose package */}
+              {step === "packages" && (
+                <>
+                  {/* Phone indicator */}
+                  <div className="phone-pill">
+                    <div className="phone-pill-icon">📱</div>
+                    <div className="phone-pill-info">
+                      <strong>{phone}</strong>
+                      <span>
+                        {detectedNet || "Ghana number"}
+                        {name ? ` · ${name}` : ""}
+                      </span>
+                    </div>
+                    <button
+                      className="phone-pill-change"
+                      onClick={() => { setStep("phone"); setSelectedPkg(null); }}
+                    >Change</button>
+                  </div>
+
+                  {/* Network filter */}
+                  <div className="net-chips">
+                    <button
+                      className={`net-chip ${selectedNetwork === null ? "active" : ""}`}
+                      onClick={() => setSelectedNetwork(null)}
+                    >All</button>
+                    {networks.map(nid => (
+                      <button
+                        key={nid}
+                        className={`net-chip ${selectedNetwork === nid ? "active" : ""}`}
+                        onClick={() => setSelectedNetwork(nid)}
+                      >{netInfo(nid).label}</button>
                     ))}
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
-      </main>
 
-      {/* Confirmation Dialog */}
-      <Dialog open={showConfirmation} onOpenChange={setShowConfirmation}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Confirm Purchase</DialogTitle>
-            <DialogDescription>
-              Please review your order details before proceeding
-            </DialogDescription>
-          </DialogHeader>
-          {selectedPackage && (
-            <div className="space-y-4 py-4">
-              <div className="border rounded-lg p-4 bg-muted/50">
-                <p className="font-medium text-lg">
-                  {selectedPackage.data_amount ||
-                    selectedPackage.volume ||
-                    selectedPackage.name}
-                </p>
-                <p className="text-muted-foreground">
-                  {networkName(selectedPackage.network_id)} •{" "}
-                  {selectedPackage.validity || "30 days"}
-                </p>
-                <p className="text-2xl font-bold mt-2">
-                  GHS {selectedPackage.selling_price.toFixed(2)}
-                </p>
-              </div>
-              <div className="space-y-2">
-                <div>
-                  <p className="text-sm font-medium">Phone Number</p>
-                  <p className="text-sm text-muted-foreground">{phoneNumber}</p>
-                </div>
-                {nickname && (
-                  <div>
-                    <p className="text-sm font-medium">Your Name/Email</p>
-                    <p className="text-sm text-muted-foreground">{nickname}</p>
+                  {/* Package grid */}
+                  <div className="pkg-grid">
+                    {visiblePackages.map(pkg => {
+                      const ni = netInfo(pkg.network_id);
+                      const isSelected = selectedPkg?.id === pkg.id;
+                      return (
+                        <div
+                          key={pkg.id}
+                          className={`pkg-card ${isSelected ? "selected" : ""}`}
+                          onClick={() => setSelectedPkg(isSelected ? null : pkg)}
+                        >
+                          <div className="pkg-net-badge" style={{ color: ni.dot }}>
+                            <span style={{
+                              width: 6, height: 6, borderRadius: "50%",
+                              background: ni.dot, display: "inline-block"
+                            }} />
+                            {ni.label}
+                          </div>
+                          <div className="pkg-size">
+                            {pkg.data_amount || pkg.volume || pkg.name}
+                          </div>
+                          <div className="pkg-validity">
+                            {pkg.validity || "30 days"}
+                          </div>
+                          <div className="pkg-price">
+                            GHS {pkg.selling_price.toFixed(2)}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                )}
+                </>
+              )}
+            </>
+          )}
+
+          {/* ── ORDERS TAB ── */}
+          {tab === "orders" && (
+            <>
+              {!phone ? (
+                <div className="empty-state">
+                  <div className="icon">📋</div>
+                  <p>Enter your phone number on the Buy Data tab<br />to view your order history.</p>
+                </div>
+              ) : loadingOrders ? (
+                <div className="empty-state">
+                  <div className="icon">⏳</div>
+                  <p>Loading your orders…</p>
+                </div>
+              ) : orders.length === 0 ? (
+                <div className="empty-state">
+                  <div className="icon">🛍️</div>
+                  <p>No orders found for {phone}.<br />Buy your first bundle!</p>
+                </div>
+              ) : (
+                <div className="orders-list">
+                  {orders.map(order => (
+                    <div key={order.id} className="order-card">
+                      <div className="order-left">
+                        <strong>
+                          {order.data_amount || order.package_name || `Package #${order.package_id}`}
+                        </strong>
+                        <span>
+                          {netInfo(order.network_id).label} · {new Date(order.created_at).toLocaleDateString("en-GH", { day: "numeric", month: "short", year: "numeric" })}
+                        </span>
+                      </div>
+                      <div className="order-right">
+                        <strong>GHS {order.amount.toFixed(2)}</strong>
+                        <div className="order-status" style={{ color: statusColor(order.status) }}>
+                          {order.status}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </main>
+
+        {/* ── Checkout bar (appears when package selected) ── */}
+        {selectedPkg && step === "packages" && tab === "buy" && (
+          <div className="checkout-bar">
+            <div className="checkout-inner">
+              <div className="checkout-info">
+                <strong>{selectedPkg.data_amount || selectedPkg.name}</strong>
+                <span>for {phone} · {netInfo(selectedPkg.network_id).label}</span>
+              </div>
+              <div className="checkout-price">GHS {selectedPkg.selling_price.toFixed(2)}</div>
+              <button
+                className="btn-buy"
+                onClick={() => setShowConfirm(true)}
+                disabled={purchasing}
+              >
+                {purchasing ? <span className="spinner" /> : "Pay Now"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Confirm modal ── */}
+        {showConfirm && selectedPkg && (
+          <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) setShowConfirm(false); }}>
+            <div className="modal-sheet">
+              <div className="modal-handle" />
+              <div className="modal-title">Confirm Purchase</div>
+
+              <div className="confirm-row">
+                <span className="label">Bundle</span>
+                <span className="value">{selectedPkg.data_amount || selectedPkg.name}</span>
+              </div>
+              <div className="confirm-row">
+                <span className="label">Network</span>
+                <span className="value">{netInfo(selectedPkg.network_id).label}</span>
+              </div>
+              <div className="confirm-row">
+                <span className="label">Validity</span>
+                <span className="value">{selectedPkg.validity || "30 days"}</span>
+              </div>
+              <div className="confirm-row">
+                <span className="label">Sending to</span>
+                <span className="value">{phone}</span>
+              </div>
+              {name && (
+                <div className="confirm-row">
+                  <span className="label">Name</span>
+                  <span className="value">{name}</span>
+                </div>
+              )}
+
+              <div className="confirm-total">
+                <span className="t-label">Total</span>
+                <span className="t-price">GHS {selectedPkg.selling_price.toFixed(2)}</span>
+              </div>
+
+              <div className="modal-actions">
+                <button className="btn-cancel" onClick={() => setShowConfirm(false)}>
+                  Cancel
+                </button>
+                <button
+                  className="btn-confirm"
+                  onClick={handlePurchase}
+                  disabled={purchasing}
+                >
+                  {purchasing ? <span className="spinner" /> : "Pay with Paystack"}
+                </button>
               </div>
             </div>
-          )}
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setShowConfirmation(false)}
-              disabled={purchasing}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleConfirmPurchase} disabled={purchasing}>
-              {purchasing ? "Processing..." : "Buy Now"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+          </div>
+        )}
+      </div>
+    </>
   );
-}
-
-// Cookie helpers
-function setCookie(name: string, value: string, days: number) {
-  const expires = new Date();
-  expires.setTime(expires.getTime() + days * 24 * 60 * 60 * 1000);
-  document.cookie = `${name}=${value};expires=${expires.toUTCString()};path=/`;
-}
-
-function getCookie(name: string): string | null {
-  const nameEQ = `${name}=`;
-  const ca = document.cookie.split(";");
-  for (let i = 0; i < ca.length; i++) {
-    let c = ca[i];
-    while (c.charAt(0) === " ") c = c.substring(1, c.length);
-    if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length);
-  }
-  return null;
 }

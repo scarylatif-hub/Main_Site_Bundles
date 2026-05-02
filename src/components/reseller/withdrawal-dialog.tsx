@@ -22,6 +22,7 @@ export function WithdrawalDialog({ walletBalance }: { walletBalance: number }) {
   const [loading, setLoading] = useState(false);
   const [amount, setAmount] = useState("");
   const [momoNumber, setMomoNumber] = useState("");
+  const [momoName, setMomoName] = useState("");
 
   const handleWithdraw = async () => {
     if (!amount || Number(amount) <= 0) {
@@ -36,6 +37,11 @@ export function WithdrawalDialog({ walletBalance }: { walletBalance: number }) {
 
     if (!momoNumber) {
       toast({ title: "Missing number", description: "Please enter your Mobile Money number", variant: "destructive" });
+      return;
+    }
+
+    if (!momoName || momoName.trim().length < 2) {
+      toast({ title: "Missing name", description: "Please enter your Mobile Money account name", variant: "destructive" });
       return;
     }
 
@@ -54,6 +60,7 @@ export function WithdrawalDialog({ walletBalance }: { walletBalance: number }) {
         body: JSON.stringify({
           amount: Number(amount),
           momoNumber,
+          momoName,
         }),
       });
 
@@ -67,6 +74,7 @@ export function WithdrawalDialog({ walletBalance }: { walletBalance: number }) {
       setOpen(false);
       setAmount("");
       setMomoNumber("");
+      setMomoName("");
       
       // Refresh stats
       window.location.reload();
@@ -109,7 +117,20 @@ export function WithdrawalDialog({ walletBalance }: { walletBalance: number }) {
           </div>
 
           <div className="space-y-2">
-            <Label>Mobile Money Number</Label>
+            <Label>MTN MoMo Account Name *</Label>
+            <Input
+              type="text"
+              placeholder="Enter your MTN Mobile Money account name"
+              value={momoName}
+              onChange={(e) => setMomoName(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              The name registered on your MTN Mobile Money account
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>MTN MoMo Number *</Label>
             <Input
               type="tel"
               placeholder="0241234567 or 233241234567"
@@ -117,7 +138,7 @@ export function WithdrawalDialog({ walletBalance }: { walletBalance: number }) {
               onChange={(e) => setMomoNumber(e.target.value)}
             />
             <p className="text-xs text-muted-foreground">
-              Enter your Ghana Mobile Money number (MTN, Vodafone, AirtelTigo)
+              Enter your Ghana MTN Mobile Money number
             </p>
           </div>
 
@@ -130,8 +151,8 @@ export function WithdrawalDialog({ walletBalance }: { walletBalance: number }) {
           </Button>
 
           <p className="text-xs text-muted-foreground text-center">
-            The amount will be deducted from your wallet immediately. 
-            You will receive the money manually after approval.
+            The amount will be deducted from your total earnings immediately. 
+            You will receive the money manually to your MTN Mobile Money after approval.
           </p>
         </div>
       </DialogContent>
