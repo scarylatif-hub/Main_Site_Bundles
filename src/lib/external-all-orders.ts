@@ -268,7 +268,7 @@ export function transactionToAdminRow(
 
 /**
  * Convert store orders from the local database to AdminOrderRow format.
- * Store orders have customer_email and customer_phone fields instead of user_id.
+ * Store orders have customer_email (which is actually the user's name) and customer_phone fields.
  */
 export function storeOrderToAdminRow(
   order: {
@@ -286,6 +286,8 @@ export function storeOrderToAdminRow(
   },
   storeName: string
 ): AdminOrderRow {
+  // For store orders, customer_email contains the user's name (from "Your Name (Optional)" field)
+  const userName = order.customer_email || "Guest";
   return {
     id: order.id,
     reference: order.paystack_transaction_id,
@@ -299,8 +301,8 @@ export function storeOrderToAdminRow(
     bundle_amount: null, // Would need to fetch package details
     status: order.status,
     amount: Math.abs(order.amount),
-    customerEmail: order.customer_email || "—",
-    customerName: storeName,
+    customerEmail: userName, // User's name (not email for store orders)
+    customerName: storeName, // Store name
     isStore: true,
   };
 }

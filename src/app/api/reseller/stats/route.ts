@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   // Get user profile
   const { data: profile } = await admin
     .from("profiles")
-    .select("is_reseller")
+    .select("is_reseller, wallet_balance")
     .eq("id", user.id)
     .single();
 
@@ -24,34 +24,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Not a reseller" }, { status: 403 });
   }
 
-  // Get completed orders with package info
-  const { data: orders } = await admin
+  // Calculate total earnings from completed orders (sum of reseller_profit field)
+  const { data: profitData } = await admin
     .from("orders")
-    .select("amount, package_id")
+    .select("reseller_profit")
     .eq("store_id", user.id)
     .eq("status", "completed");
 
-  // Calculate total profit (not full amount)
-  const adminMarkup = 0.14;
   let totalEarnings = 0;
-
-  if (orders && orders.length > 0) {
-    // Fetch packages to get console prices
-    const pkgResult = await datakazinaAPI.fetchDataPackages();
-    if (pkgResult.ok && pkgResult.data) {
-      for (const order of orders) {
-        const pkg = pkgResult.data.find((p) => String(p.id) === String(order.package_id));
-        if (pkg) {
-          const consolePrice = Number(pkg.console_price ?? pkg.price ?? 0);
-          const resellerCost = consolePrice * (1 + adminMarkup);
-          const resellerProfit = order.amount - resellerCost;
-          if (resellerProfit > 0) {
-            totalEarnings += resellerProfit;
-          }
-        }
-      }
-    }
+  if (profitData) {
+    totalEarnings = profitData.reduce((sum, order) => sum + (order.reseller_profit || 0), 0);
   }
+
+  // Also include wallet balance (which should match total earnings, but we show both for transparency)
+  const walletBalance = Number(profile.wallet_balance || 0);
 
   // Count active packages (using DataKazina API count)
   const totalPackages = 49; // From debug output
@@ -65,6 +51,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     totalEarnings,
+    walletBalance,
     totalPackages,
     activePackages,
     totalOrders: totalOrders || 0,

@@ -229,21 +229,38 @@ export async function POST(req: NextRequest) {
 
   console.log("[guest/orders] Updating order to completed:", providerCode);
 
+  // Calculate reseller profit before updating order
+  const adminMarkup    = 0.14;
+  const consolePrice   = Number(pkg.console_price ?? pkg.price ?? 0);
+  const resellerCost   = consolePrice * (1 + adminMarkup);
+  const resellerProfit = Number(amount) - resellerCost;
+
+  console.log("[guest/orders] Profit calculation:", {
+    amountPaid: Number(amount),
+    consolePrice,
+    adminMarkup,
+    resellerCost,
+    resellerProfit,
+  });
+
   await admin
     .from("orders")
     .update({
       status:                   "completed",
       paystack_transaction_id:  providerCode,
       error_message:            null,
+      reseller_profit:          resellerProfit > 0 ? resellerProfit : 0,
     })
     .eq("id", newOrder.id);
 
-  console.log("[guest/orders] Order updated successfully, crediting reseller wallet");
+  console.log("[guest/orders] Order updated successfully with profit:", resellerProfit);
 
-  // Credit reseller profit (non-blocking — failure here must not affect the response)
-  creditResellerWallet(admin, storeOwner, pkg, Number(amount)).catch((e) =>
-    console.error("[guest/orders] Wallet credit failed:", e)
-  );
+  // Credit reseller profit to wallet (non-blocking — failure here must not affect the response)
+  if (resellerProfit > 0) {
+    creditResellerWallet(admin, storeOwner, resellerProfit).catch((e) =>
+      console.error("[guest/orders] Wallet credit failed:", e)
+    );
+  }
 
   return NextResponse.json({
     success:          true,
@@ -256,24 +273,10 @@ export async function POST(req: NextRequest) {
 
 async function creditResellerWallet(
   admin:      ReturnType<typeof createAdminClient>,
-  storeOwner: { id: string; wallet_balance: number | null; profit_margin: number | null },
-  pkg:        { console_price?: string | number; price?: string | number },
-  amountPaid: number
+  storeOwner: { id: string; wallet_balance: number | null },
+  profit:     number
 ): Promise<void> {
-  const adminMarkup    = 0.14;
-  const consolePrice   = Number(pkg.console_price ?? pkg.price ?? 0);
-  const resellerCost   = consolePrice * (1 + adminMarkup);
-  const resellerProfit = amountPaid - resellerCost;
-
-  console.log("[guest/orders] Profit calculation:", {
-    amountPaid,
-    consolePrice,
-    adminMarkup,
-    resellerCost,
-    resellerProfit,
-  });
-
-  if (resellerProfit <= 0) {
+  if (profit <= 0) {
     console.log("[guest/orders] No profit to credit, skipping wallet update");
     return;
   }
@@ -281,12 +284,12 @@ async function creditResellerWallet(
   // Use increment via RPC if available — otherwise read-then-write is acceptable
   // here because the wallet credit is non-critical (can be reconciled manually).
   const currentBalance = Number(storeOwner.wallet_balance ?? 0);
-  const newBalance = currentBalance + resellerProfit;
+  const newBalance = currentBalance + profit;
 
   console.log("[guest/orders] Crediting reseller wallet:", {
     storeId: storeOwner.id,
     currentBalance,
-    profitToAdd: resellerProfit,
+    profitToAdd: profit,
     newBalance,
   });
 

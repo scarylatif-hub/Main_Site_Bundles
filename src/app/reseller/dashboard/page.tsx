@@ -25,6 +25,7 @@ import {
 
 type StoreStats = {
   totalEarnings: number;
+  walletBalance: number;
   totalPackages: number;
   activePackages: number;
   totalOrders: number;
@@ -35,6 +36,7 @@ export default function ResellerDashboard() {
   const router = useRouter();
   const [stats, setStats] = useState<StoreStats>({
     totalEarnings: 0,
+    walletBalance: 0,
     totalPackages: 0,
     activePackages: 0,
     totalOrders: 0,
@@ -163,6 +165,19 @@ export default function ResellerDashboard() {
             <div className="space-y-1">
               <div className="flex items-center gap-2">
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
+                <p className="text-sm font-medium">Wallet Balance</p>
+              </div>
+              <p className="text-xl font-bold">
+                ₵{loadingStats ? "..." : stats.walletBalance.toFixed(2)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Available for withdrawal
+              </p>
+            </div>
+
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="h-4 w-4 text-muted-foreground" />
                 <p className="text-sm font-medium">Total Earnings</p>
               </div>
               <p className="text-xl font-bold">
@@ -183,19 +198,6 @@ export default function ResellerDashboard() {
               </p>
               <p className="text-xs text-muted-foreground">
                 Available packages
-              </p>
-            </div>
-
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                <p className="text-sm font-medium">Active Packages</p>
-              </div>
-              <p className="text-xl font-bold">
-                {loadingStats ? "..." : stats.activePackages}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Currently active
               </p>
             </div>
 

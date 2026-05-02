@@ -365,7 +365,10 @@ export function AdminOrdersTable({
                       <TableCell className="text-sm whitespace-nowrap">
                         <div className="font-medium">{row.customerEmail}</div>
                         {row.customerName && (
-                          <div className="text-xs text-muted-foreground">{row.customerName}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {row.customerName}
+                            {row.isStore && <span className="ml-1 text-orange-600 font-medium">(store)</span>}
+                          </div>
                         )}
                       </TableCell>
                       <TableCell className="text-sm whitespace-nowrap">
