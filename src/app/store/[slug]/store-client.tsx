@@ -76,7 +76,10 @@ const NETWORK_NAME_MAP: Record<number, string> = {
 
 const ALLOWED_NETWORKS = [2, 3, 4]; // Telecel, MTN, AirtelTigo (DataKazina IDs)
 
-export default function StoreClient({ storeOwner, packages }: StoreClientProps) {
+export default function StoreClient({
+  storeOwner,
+  packages,
+}: StoreClientProps) {
   const [selectedNetwork, setSelectedNetwork] = useState<number | null>(null);
   const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -96,14 +99,16 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
       detectNetworkFromPhone(savedPhone);
     }
     if (savedNickname) setNickname(savedNickname);
-    
+
     // Load order history if phone is saved
     if (savedPhone) {
       loadOrderHistory(savedPhone);
     }
   }, []);
 
-  const networks = Array.from(new Set(packages.map((p) => p.network_id))).filter(n => ALLOWED_NETWORKS.includes(n));
+  const networks = Array.from(
+    new Set(packages.map((p) => p.network_id)),
+  ).filter((n) => ALLOWED_NETWORKS.includes(n));
   const filteredPackages = selectedNetwork
     ? packages.filter((p) => p.network_id === selectedNetwork)
     : packages.filter((p) => ALLOWED_NETWORKS.includes(p.network_id));
@@ -138,20 +143,20 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
   const formatPhoneNumber = (value: string) => {
     // Remove all spaces and special characters except digits
     let cleaned = value.replace(/\s/g, "").replace(/[^\d+]/g, "");
-    
+
     // Convert +233 to 0
     if (cleaned.startsWith("+233")) {
       cleaned = "0" + cleaned.substring(4);
     }
-    
+
     // Remove any remaining + signs
     cleaned = cleaned.replace(/\+/g, "");
-    
+
     // Ensure it starts with 0
     if (cleaned.length > 0 && !cleaned.startsWith("0")) {
       cleaned = "0" + cleaned;
     }
-    
+
     // Limit to 10 digits
     return cleaned.substring(0, 10);
   };
@@ -164,7 +169,9 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
 
   const loadOrderHistory = async (phone: string) => {
     try {
-      const res = await fetch(`/api/store/${storeOwner.reseller_slug}/orders?phone=${phone}`);
+      const res = await fetch(
+        `/api/store/${storeOwner.reseller_slug}/orders?phone=${phone}`,
+      );
       const data = await res.json();
       if (data.success) {
         setOrderHistory(data.orders || []);
@@ -190,13 +197,20 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
     setPurchasing(true);
 
     try {
-      // Initialize Paystack payment - ensure valid email format
-      const email = nickname && nickname.includes('@') ? nickname : `${phoneNumber}@ghana.com`;
+      const cleanNickname = nickname?.trim();
+      const cleanPhone = phoneNumber.replace(/\D/g, "");
+
+      const email =
+        cleanNickname && cleanNickname.length > 0
+          ? cleanNickname.includes("@")
+            ? cleanNickname
+            : `${cleanNickname}@ghana.com`
+          : `${cleanPhone}@ghana.com`;
       const reference = `store-${storeOwner.id}-${Date.now()}`;
-      
-      const initResponse = await fetch('/api/paystack/guest/initialize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+
+      const initResponse = await fetch("/api/paystack/guest/initialize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           amount: selectedPackage.selling_price,
           email,
@@ -212,21 +226,21 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
       });
 
       if (!initResponse.ok) {
-        throw new Error('Failed to initialize payment');
+        throw new Error("Failed to initialize payment");
       }
 
       const initData = await initResponse.json();
-      
+
       // Open Paystack popup
       const paystackPublicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY;
       if (!paystackPublicKey) {
-        throw new Error('Payment service not configured');
+        throw new Error("Payment service not configured");
       }
 
       // Load Paystack script if not already loaded
       if (!window.PaystackPop) {
-        const script = document.createElement('script');
-        script.src = 'https://js.paystack.co/v1/inline.js';
+        const script = document.createElement("script");
+        script.src = "https://js.paystack.co/v1/inline.js";
         script.async = true;
         await new Promise((resolve, reject) => {
           script.onload = resolve;
@@ -241,16 +255,16 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
         email: email,
         amount: Math.round(selectedPackage.selling_price * 100), // Convert to kobo
         ref: reference,
-        currency: 'GHS',
+        currency: "GHS",
         onClose: () => {
           setPurchasing(false);
           toast({
-            title: 'Payment Cancelled',
-            description: 'You cancelled the payment',
-            variant: 'destructive',
+            title: "Payment Cancelled",
+            description: "You cancelled the payment",
+            variant: "destructive",
           });
         },
-        callback: function(response: any) {
+        callback: function (response: any) {
           // Payment successful, now call the API to process the order
           fetch("/api/guest/orders", {
             method: "POST",
@@ -265,51 +279,54 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
               payment_reference: reference,
             }),
           })
-          .then(res => {
-            if (!res.ok) {
-              return res.json().then(data => {
+            .then((res) => {
+              if (!res.ok) {
+                return res.json().then((data) => {
+                  throw new Error(
+                    data.error || "Purchase failed after payment",
+                  );
+                });
+              }
+              return res.json();
+            })
+            .then((data) => {
+              // Handle retry_pending status as success (order is being processed)
+              if (data.retry_pending) {
+                toast({
+                  title: "Successful Purchase",
+                  description: "Data will be sent shortly.",
+                  variant: "default",
+                });
+                setSelectedPackage(null);
+                loadOrderHistory(phoneNumber);
+                return;
+              }
+
+              // Handle actual errors
+              if (data.error) {
                 throw new Error(data.error || "Purchase failed after payment");
-              });
-            }
-            return res.json();
-          })
-          .then(data => {
-            // Handle retry_pending status as success (order is being processed)
-            if (data.retry_pending) {
+              }
+
+              // Success case
               toast({
-                title: "Successful Purchase",
+                title: "Purchase Successful",
                 description: "Data will be sent shortly.",
                 variant: "default",
               });
               setSelectedPackage(null);
               loadOrderHistory(phoneNumber);
-              return;
-            }
-            
-            // Handle actual errors
-            if (data.error) {
-              throw new Error(data.error || "Purchase failed after payment");
-            }
-            
-            // Success case
-            toast({
-              title: "Purchase Successful",
-              description: "Data will be sent shortly.",
-              variant: "default",
+            })
+            .catch((error) => {
+              toast({
+                title: "Purchase Failed",
+                description:
+                  error instanceof Error ? error.message : "An error occurred",
+                variant: "destructive",
+              });
+            })
+            .finally(() => {
+              setPurchasing(false);
             });
-            setSelectedPackage(null);
-            loadOrderHistory(phoneNumber);
-          })
-          .catch(error => {
-            toast({
-              title: "Purchase Failed",
-              description: error instanceof Error ? error.message : "An error occurred",
-              variant: "destructive",
-            });
-          })
-          .finally(() => {
-            setPurchasing(false);
-          });
         },
       });
 
@@ -317,7 +334,8 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
     } catch (error) {
       toast({
         title: "Payment Failed",
-        description: error instanceof Error ? error.message : "Failed to process payment",
+        description:
+          error instanceof Error ? error.message : "Failed to process payment",
         variant: "destructive",
       });
       setPurchasing(false);
@@ -341,7 +359,10 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
       </header>
 
       <main className="container mx-auto px-4 py-8">
-        <Tabs value={activeTab} onValueChange={(v) => handleTabChange(v as "buy" | "history")}>
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => handleTabChange(v as "buy" | "history")}
+        >
           <TabsList className="grid w-full max-w-md grid-cols-2">
             <TabsTrigger value="buy">Buy Data</TabsTrigger>
             <TabsTrigger value="history">My Orders</TabsTrigger>
@@ -437,7 +458,11 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
                         {networks.map((networkId) => (
                           <Button
                             key={networkId}
-                            variant={selectedNetwork === networkId ? "default" : "outline"}
+                            variant={
+                              selectedNetwork === networkId
+                                ? "default"
+                                : "outline"
+                            }
                             onClick={() => setSelectedNetwork(networkId)}
                           >
                             {networkName(networkId)}
@@ -450,16 +475,21 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
                           <Card
                             key={pkg.id}
                             className={`cursor-pointer transition-colors ${
-                              selectedPackage?.id === pkg.id ? "border-primary" : ""
+                              selectedPackage?.id === pkg.id
+                                ? "border-primary"
+                                : ""
                             }`}
                             onClick={() => setSelectedPackage(pkg)}
                           >
                             <CardContent className="p-4">
                               <div className="flex justify-between items-start">
                                 <div className="flex-1">
-                                  <p className="font-medium text-lg">{pkg.data_amount || pkg.volume || pkg.name}</p>
+                                  <p className="font-medium text-lg">
+                                    {pkg.data_amount || pkg.volume || pkg.name}
+                                  </p>
                                   <p className="text-sm text-muted-foreground">
-                                    {networkName(pkg.network_id)} • {pkg.validity || "30 days"}
+                                    {networkName(pkg.network_id)} •{" "}
+                                    {pkg.validity || "90 days"}
                                   </p>
                                 </div>
                                 <div className="text-right ml-4">
@@ -490,7 +520,8 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
               <CardContent>
                 {!phoneNumber ? (
                   <p className="text-sm text-muted-foreground text-center py-8">
-                    Enter your phone number on the Buy Data tab to view your order history
+                    Enter your phone number on the Buy Data tab to view your
+                    order history
                   </p>
                 ) : orderHistory.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-8">
@@ -502,9 +533,13 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
                       <div key={order.id} className="border rounded-lg p-4">
                         <div className="flex justify-between items-start">
                           <div>
-                            <p className="font-medium">{order.package_name || `Package ${order.package_id}`}</p>
+                            <p className="font-medium">
+                              {order.package_name ||
+                                `Package ${order.package_id}`}
+                            </p>
                             <p className="text-sm text-muted-foreground">
-                              {networkName(order.network_id)} • {order.data_amount || "N/A"}
+                              {networkName(order.network_id)} •{" "}
+                              {order.data_amount || "N/A"}
                             </p>
                             <p className="text-xs text-muted-foreground mt-1">
                               {new Date(order.created_at).toLocaleString()}
@@ -514,11 +549,15 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
                             <p className="font-bold">
                               GHS {order.amount.toFixed(2)}
                             </p>
-                            <p className={`text-sm ${
-                              order.status === "completed" ? "text-green-600" :
-                              order.status === "processing" ? "text-yellow-600" :
-                              "text-red-600"
-                            }`}>
+                            <p
+                              className={`text-sm ${
+                                order.status === "completed"
+                                  ? "text-green-600"
+                                  : order.status === "processing"
+                                    ? "text-yellow-600"
+                                    : "text-red-600"
+                              }`}
+                            >
                               {order.status}
                             </p>
                           </div>
@@ -545,9 +584,14 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
           {selectedPackage && (
             <div className="space-y-4 py-4">
               <div className="border rounded-lg p-4 bg-muted/50">
-                <p className="font-medium text-lg">{selectedPackage.data_amount || selectedPackage.volume || selectedPackage.name}</p>
+                <p className="font-medium text-lg">
+                  {selectedPackage.data_amount ||
+                    selectedPackage.volume ||
+                    selectedPackage.name}
+                </p>
                 <p className="text-muted-foreground">
-                  {networkName(selectedPackage.network_id)} • {selectedPackage.validity || "30 days"}
+                  {networkName(selectedPackage.network_id)} •{" "}
+                  {selectedPackage.validity || "30 days"}
                 </p>
                 <p className="text-2xl font-bold mt-2">
                   GHS {selectedPackage.selling_price.toFixed(2)}
@@ -575,10 +619,7 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
             >
               Cancel
             </Button>
-            <Button
-              onClick={handleConfirmPurchase}
-              disabled={purchasing}
-            >
+            <Button onClick={handleConfirmPurchase} disabled={purchasing}>
               {purchasing ? "Processing..." : "Buy Now"}
             </Button>
           </DialogFooter>

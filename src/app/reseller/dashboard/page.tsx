@@ -44,6 +44,8 @@ export default function ResellerDashboard() {
   const [loadingStats, setLoadingStats] = useState(true);
 
   useEffect(() => {
+    console.log(userProfile);
+
     if (!loading && !user) {
       router.push("/login");
     }
@@ -70,7 +72,7 @@ export default function ResellerDashboard() {
   };
 
   const copyStoreUrl = () => {
-    const url = `${window.location.origin}/store/${userProfile?.reseller_slug}`;
+    const url = `${window.location.origin}/store/${userProfile?.store_name}`;
     navigator.clipboard.writeText(url);
     toast({
       title: "Copied to clipboard",
@@ -91,7 +93,7 @@ export default function ResellerDashboard() {
     return null;
   }
 
-  const storeUrl = `${window.location.origin}/store/${userProfile?.reseller_slug}`;
+  const storeUrl = `${window.location.origin}/store/${userProfile?.store_name}`;
 
   return (
     <div className="container mx-auto max-w-6xl px-4 py-8">
@@ -105,9 +107,13 @@ export default function ResellerDashboard() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="text-2xl">{userProfile?.store_name}</CardTitle>
+              <CardTitle className="text-2xl">
+                {userProfile?.store_name}
+              </CardTitle>
               <CardDescription>
-                {userProfile?.reseller_approved ? "Active Store" : "Pending Approval"}
+                {userProfile?.reseller_approved
+                  ? "Active Store"
+                  : "Pending Approval"}
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
@@ -146,7 +152,9 @@ export default function ResellerDashboard() {
             <Button
               variant="outline"
               className="flex-1 h-16 flex-col gap-1 sm:flex-row sm:gap-2 sm:h-12"
-              onClick={() => window.open(`/store/${userProfile?.reseller_slug}`, '_blank')}
+              onClick={() =>
+                window.open(`/store/${userProfile?.store_name}`, "_blank")
+              }
             >
               <Eye className="h-4 w-4" />
               <span className="text-sm">View Store</span>
@@ -183,9 +191,7 @@ export default function ResellerDashboard() {
               <p className="text-xl font-bold">
                 ₵{loadingStats ? "..." : stats.totalEarnings.toFixed(2)}
               </p>
-              <p className="text-xs text-muted-foreground">
-                Lifetime earnings
-              </p>
+              <p className="text-xs text-muted-foreground">Lifetime earnings</p>
             </div>
 
             <div className="space-y-1">
@@ -209,9 +215,7 @@ export default function ResellerDashboard() {
               <p className="text-xl font-bold">
                 {loadingStats ? "..." : stats.totalOrders}
               </p>
-              <p className="text-xs text-muted-foreground">
-                Orders processed
-              </p>
+              <p className="text-xs text-muted-foreground">Orders processed</p>
             </div>
           </div>
         </CardContent>
