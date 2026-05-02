@@ -22,6 +22,7 @@ import {
   Edit,
   Eye,
 } from "lucide-react";
+import { WithdrawalDialog } from "@/components/reseller/withdrawal-dialog";
 
 type StoreStats = {
   totalEarnings: number;
@@ -181,6 +182,9 @@ export default function ResellerDashboard() {
               <p className="text-xs text-muted-foreground">
                 Available for withdrawal
               </p>
+              {!loadingStats && (
+                <WithdrawalDialog walletBalance={stats.walletBalance} />
+              )}
             </div>
 
             <div className="space-y-1">

@@ -549,15 +549,11 @@ export default function StoreClient({
                             <p className="font-bold">
                               GHS {order.amount.toFixed(2)}
                             </p>
-                            <p
-                              className={`text-sm ${
-                                order.status === "completed"
-                                  ? "text-green-600"
-                                  : order.status === "processing"
-                                    ? "text-yellow-600"
-                                    : "text-red-600"
-                              }`}
-                            >
+                            <p className={`text-sm ${
+                              order.status === "completed" ? "text-green-600" :
+                              // order.status === "processing" ? "text-yellow-600" :
+                              "text-red-600"
+                            }`}>
                               {order.status}
                             </p>
                           </div>
