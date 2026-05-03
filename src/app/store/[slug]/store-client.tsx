@@ -43,9 +43,9 @@ const NETWORK_PREFIXES: Record<string, string[]> = {
 };
 
 const NETWORK_MAP: Record<number, { label: string; color: string; bg: string; dot: string }> = {
-  1: { label: "AirtelTigo", color: "#E8001C", bg: "#fff1f2", dot: "#E8001C" },
+  1: { label: "MTN",        color: "#FFCC00", bg: "#fffbeb", dot: "#d97706" },
   2: { label: "Telecel",    color: "#CC0000", bg: "#fff1f1", dot: "#CC0000" },
-  3: { label: "MTN",        color: "#FFCC00", bg: "#fffbeb", dot: "#d97706" },
+  3: { label: "AirtelTigo", color: "#E8001C", bg: "#fff1f2", dot: "#E8001C" },
   4: { label: "AirtelTigo", color: "#E8001C", bg: "#fff1f2", dot: "#E8001C" },
   5: { label: "MTN AFA",    color: "#FFCC00", bg: "#fffbeb", dot: "#d97706" },
 };
@@ -119,9 +119,9 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
   function handlePhoneDetect(val: string) {
     const net = detectNetwork(val);
     setDetectedNet(net);
-    if (net === "MTN")        setSelectedNetwork(3);
-    else if (net === "TELECEL")    setSelectedNetwork(2);
-    else if (net === "AIRTELTIGO") setSelectedNetwork(1);
+    if (net === "MTN")        setSelectedNetwork(1);  // Display ID 1 = MTN
+    else if (net === "TELECEL")    setSelectedNetwork(2);  // Display ID 2 = Telecel
+    else if (net === "AIRTELTIGO") setSelectedNetwork(3);  // Display ID 3 = AirtelTigo
   }
 
   function handlePhoneChange(val: string) {

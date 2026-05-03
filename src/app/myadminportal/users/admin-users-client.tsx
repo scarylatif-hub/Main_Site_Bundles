@@ -32,7 +32,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { ADMIN_EMAIL } from "@/lib/admin-config";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Download, X } from "lucide-react";
+import { Search, Download, X, Check, XCircle, Store } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 20;
@@ -194,6 +194,34 @@ export function AdminUsersClient({ users }: { users: Profile[] }) {
     toast({ title: "Exported all user data" });
   }
 
+  // ── Store Approval ──────────────────────────────────────────────────────────────
+
+  async function handleStoreApproval(userId: string, approved: boolean) {
+    setBusyId(userId);
+    try {
+      const res = await fetch(`/api/admin/stores/${userId}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approved }),
+      });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || "Approval action failed");
+      toast({ 
+        title: approved ? "Store approved" : "Store declined",
+        description: approved ? "The store is now active" : "The store request was rejected"
+      });
+      window.location.reload();
+    } catch (e: unknown) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: e instanceof Error ? e.message : "Approval action failed",
+      });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   // ── Delete ──────────────────────────────────────────────────────────────────
 
   async function deleteUser(id: string, email: string) {
@@ -320,6 +348,7 @@ export function AdminUsersClient({ users }: { users: Profile[] }) {
                 <TableHead className="whitespace-nowrap font-semibold">Name</TableHead>
                 <TableHead className="whitespace-nowrap font-semibold">Email</TableHead>
                 <TableHead className="whitespace-nowrap font-semibold">Phone</TableHead>
+                <TableHead className="whitespace-nowrap font-semibold">Store Status</TableHead>
                 <TableHead className="whitespace-nowrap font-semibold text-right">Balance</TableHead>
                 <TableHead className="whitespace-nowrap font-semibold text-right">Actions</TableHead>
               </TableRow>
@@ -336,11 +365,51 @@ export function AdminUsersClient({ users }: { users: Profile[] }) {
                       <TableCell className="text-sm font-mono whitespace-nowrap">
                         {(u as any).phone_number || "—"}
                       </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {u.is_reseller ? (
+                          <div className="flex items-center gap-2">
+                            <Store className="h-4 w-4 text-blue-600" />
+                            <div className="flex flex-col">
+                              <span className="text-xs font-medium">{u.store_name || 'No Store Name'}</span>
+                              {u.reseller_approved ? (
+                                <Badge variant="default" className="text-xs bg-green-100 text-green-800">Approved</Badge>
+                              ) : (
+                                <Badge variant="secondary" className="text-xs bg-yellow-100 text-yellow-800">Pending Approval</Badge>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">Regular User</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right tabular-nums whitespace-nowrap font-semibold text-emerald-600">
                         GHS {Number(u.wallet_balance).toFixed(2)}
                       </TableCell>
                       <TableCell className="text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-2">
+                          {u.is_reseller && !u.reseller_approved && (
+                            <>
+                              <Button
+                                variant="default"
+                                size="sm"
+                                disabled={busyId === u.id}
+                                onClick={() => handleStoreApproval(u.id, true)}
+                                className="bg-green-600 hover:bg-green-700"
+                              >
+                                <Check className="h-4 w-4 mr-1" />
+                                Approve
+                              </Button>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                disabled={busyId === u.id}
+                                onClick={() => handleStoreApproval(u.id, false)}
+                              >
+                                <XCircle className="h-4 w-4 mr-1" />
+                                Decline
+                              </Button>
+                            </>
+                          )}
                           <BalanceDialog
                             userId={u.id}
                             current={Number(u.wallet_balance)}
@@ -362,7 +431,7 @@ export function AdminUsersClient({ users }: { users: Profile[] }) {
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
                     {search
                       ? `No users match "${search}" in ${FILTER_LABELS[filterField].toLowerCase()}`
                       : "No users found."}

@@ -127,7 +127,7 @@ export default function ResellerDashboard() {
 
   if (!userProfile?.is_reseller) {
     // Use useEffect to navigate during render, not during component render
-    React.useEffect(() => {
+    useEffect(() => {
       router.push("/profile");
     }, []);
     return null;

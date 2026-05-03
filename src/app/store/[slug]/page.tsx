@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { datakazinaAPI } from "@/lib/datakazina";
 import { redirect } from "next/navigation";
+import { datakazinaNetworkIdToDisplay } from "@/lib/network-id-map";
 import StoreClient from "./store-client";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +19,7 @@ export default async function StorePage({
   const { data: storeOwner, error: storeError } = await admin
     .from("profiles")
     .select("*")
-    .eq("store_name", slug)
+    .eq("reseller_slug", slug)
     .single();
 
   if (storeError || !storeOwner) {
@@ -50,6 +51,8 @@ export default async function StorePage({
         const resellerCost = consolePrice * (1 + adminMarkup);
         const sellingPrice = resellerCost * (1 + profitMargin);
 
+        // Convert DataKazina network ID to display network ID
+        const displayNetworkId = datakazinaNetworkIdToDisplay(Number(pkg.network_id));
 
         // Use volumeGB field for display (e.g., "2GB", "3GB")
         const displayName =
@@ -61,7 +64,7 @@ export default async function StorePage({
 
         return {
           id: pkg.id,
-          network_id: pkg.network_id,
+          network_id: displayNetworkId,
           name: displayName,
           data_amount: displayName,
           cost_price: resellerCost,

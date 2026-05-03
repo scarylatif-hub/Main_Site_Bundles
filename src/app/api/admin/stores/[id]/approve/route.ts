@@ -1,18 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { isAdminEmail } from "@/lib/admin-config";
+import { requireAdmin } from "@/lib/admin-api";
 
 export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const admin = createAdminClient();
-    const { data: { user } } = await admin.auth.getUser();
-
-    if (!user || !isAdminEmail(user.email)) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const ctx = await requireAdmin();
+    if (!ctx.ok) return ctx.response;
+    const admin = ctx.admin;
 
     const { id } = params;
     

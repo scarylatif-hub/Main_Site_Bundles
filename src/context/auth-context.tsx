@@ -12,23 +12,17 @@ import {
 } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { type User, type Session } from "@supabase/supabase-js";
+import type { Profile } from "@/lib/definitions";
 
-export type Profile = {
-  id: string;
-  full_name: string | null;
-  email: string | null;
-  phone_number: string | null;
-  avatar_url: string | null;
-  wallet_balance: number;
-  updated_at: string | null;
-  is_admin: boolean;
-  is_reseller: boolean | null;
-  reseller_approved: boolean | null;
-  store_active: boolean | null;
-  store_name: string | null;
-  reseller_slug: string | null;
-  profit_margin: number | null;
-};
+// Simple debounce function
+function debounce<T extends (...args: any[]) => any>(func: T, wait: number): T {
+  let timeout: NodeJS.Timeout;
+  return ((...args: Parameters<T>) => {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func(...args), wait);
+  }) as T;
+}
+
 
 export type AuthContextType = {
   user: User | null;
@@ -51,6 +45,13 @@ async function fetchProfile(userId: string): Promise<Profile | null> {
 
     // 406 = no row found (expected for brand new users before profile is created)
     if (error && status !== 406) {
+      // Handle lock broken errors gracefully - these are temporary Supabase session conflicts
+      if (error.message.includes("Lock broken") || error.message.includes("steal")) {
+        console.warn("fetchProfile: Temporary session conflict, retrying...");
+        // Retry once after a short delay
+        await new Promise(resolve => setTimeout(resolve, 100));
+        return fetchProfile(userId);
+      }
       console.error("fetchProfile error:", error.message);
       return null;
     }
@@ -63,6 +64,12 @@ async function fetchProfile(userId: string): Promise<Profile | null> {
       is_admin: Boolean(data.is_admin),
     } as Profile;
   } catch (e) {
+    // Handle lock broken errors at the catch level too
+    if (e instanceof Error && (e.message.includes("Lock broken") || e.message.includes("steal"))) {
+      console.warn("fetchProfile: Temporary session conflict in catch, retrying...");
+      await new Promise(resolve => setTimeout(resolve, 100));
+      return fetchProfile(userId);
+    }
     console.error("fetchProfile unexpected error:", e);
     return null;
   }
@@ -86,25 +93,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Debounced version to prevent rapid successive calls
+  const debouncedApplySession = useCallback(
+    debounce(async (s: Session | null) => {
+      await applySession(s);
+    }, 200),
+    [applySession]
+  );
+
   useEffect(() => {
     let mounted = true;
 
-    // Use getUser() — authenticates with Supabase Auth server (secure).
-    // getSession() reads from storage and is NOT authenticated — never use
-    // getSession() to make security decisions.
-    supabase.auth.getUser().then(async ({ data: { user: u } }) => {
+    // Initialize auth state - use getSession() for initial load to avoid server calls
+    supabase.auth.getSession().then(async ({ data: { session: s } }) => {
       if (!mounted) return;
-      if (u) {
-        // Also grab the session for the session state value
-        const { data: { session: s } } = await supabase.auth.getSession();
-        setSession(s);
-        setUser(u);
-        const profile = await fetchProfile(u.id);
-        if (mounted) setUserProfile(profile);
-      }
+      await applySession(s);
       if (mounted) setLoading(false);
     });
 
+    // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, s) => {
         if (!mounted) return;

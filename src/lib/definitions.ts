@@ -56,5 +56,8 @@ export type Profile = {
   phone_number: string;
   wallet_balance: number;
   is_admin: boolean;
+  is_reseller?: boolean;
+  store_name?: string;
+  reseller_approved?: boolean;
   updated_at: string;
 };
