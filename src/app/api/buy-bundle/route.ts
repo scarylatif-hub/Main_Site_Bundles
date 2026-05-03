@@ -13,7 +13,8 @@ import { createClient }                 from "@/lib/supabase/server";
 import { createAdminClient }            from "@/lib/supabase/admin";
 import type { SupabaseClient }          from "@supabase/supabase-js";
 import { datakazinaAPI }                from "@/lib/datakazina";
-import { normalizePhoneNumber, mapToDataKazinaNetworkId } from "@/lib/networks";
+import { normalizePhoneNumber } from "@/lib/networks";
+import { displayNetworkIdToDatakazina } from "@/lib/network-id-map";
 import { notifyAdminBundlePurchase }    from "@/lib/server/notifications";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -110,13 +111,7 @@ export async function POST(req: NextRequest) {
     dataAmount?:      unknown;
   };
 
-  console.log("[buy-bundle][STEP-2] Body:", {
-    recipientMsisdn,
-    networkId,      networkIdType:    typeof networkId,
-    sharedBundle,   sharedBundleType: typeof sharedBundle,
-    price,          priceType:        typeof price,
-    dataAmount,
-  });
+  // Removed body logging to prevent exposing sensitive data in console
 
   if (!recipientMsisdn || networkId == null || sharedBundle == null || price == null || !dataAmount) {
     console.error("[buy-bundle][STEP-2] Missing fields");
@@ -148,7 +143,7 @@ export async function POST(req: NextRequest) {
   }
 
   const balanceBefore = Number(profile.wallet_balance);
-  console.log("[buy-bundle][STEP-3] Balance:", balanceBefore, "required:", p);
+  // Removed balance logging to prevent exposing financial data in console
 
   if (balanceBefore < p) {
     return NextResponse.json(
@@ -196,12 +191,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Could not create order record" }, { status: 500 });
   }
 
-  console.log("[buy-bundle][STEP-4] Wallet debited, pending tx created:", reference);
+  // Removed transaction logging to prevent exposing sensitive data in console
 
   // STEP 5 — Call DataKazina /buy-data-package
-  // Map frontend network ID to DataKazina network ID
-  const datakazinaNetworkId = mapToDataKazinaNetworkId(Number(networkId));
-  console.log("[buy-bundle][STEP-5] Network ID mapping:", { frontend: Number(networkId), datakazina: datakazinaNetworkId });
+  // Map display network ID to DataKazina network ID
+  const datakazinaNetworkId = displayNetworkIdToDatakazina(Number(networkId));
+  // Removed network ID mapping logging to prevent exposing internal logic
 
   const purchaseParams = {
     recipient_msisdn,
@@ -209,18 +204,13 @@ export async function POST(req: NextRequest) {
     shared_bundle:    Number(sharedBundle), // pkg.id from the package list
     incoming_api_ref: reference,
   };
-  console.log("[buy-bundle][STEP-5] Calling DataKazina:", purchaseParams);
+  // removed parameter logging to prevent exposing API call details
 
   try {
     const result = await datakazinaAPI.purchaseDataPackage(purchaseParams);
 
     // Log the full raw response so we learn what DataKazina actually returns
-    console.log("[buy-bundle][STEP-5] DataKazina response:", {
-      ok:      result.ok,
-      status:  result.status,
-      rawText: result.rawText,
-      data:    result.ok ? result.data : null,
-    });
+    // Removed response logging to prevent exposing API responses in console
 
     // STEP 6a — Provider error
     if (!result.ok) {
@@ -255,7 +245,7 @@ export async function POST(req: NextRequest) {
       reference // fallback to our own reference if DataKazina returns nothing useful
     );
 
-    console.log("[buy-bundle][STEP-6b] Success. providerCode:", providerCode);
+  // Removed success logging to prevent exposing transaction codes
 
     // Mark transaction as placed
     const patch = {
@@ -273,7 +263,7 @@ export async function POST(req: NextRequest) {
 
     if (updateErr) {
       // Fallback: match by transaction_code in case reference already changed
-      console.warn("[buy-bundle][STEP-6b] Primary update failed, trying fallback:", updateErr.message);
+      // Removed error logging to prevent exposing sensitive database errors in console
       await admin
         .from("transactions")
         .update(patch)

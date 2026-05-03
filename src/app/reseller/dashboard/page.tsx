@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/auth-context";
 import { PageHeader } from "@/components/page-header";
@@ -25,6 +25,8 @@ import {
 } from "lucide-react";
 import { WithdrawalDialog } from "@/components/reseller/withdrawal-dialog";
 import { MoveToWalletDialog } from "@/components/reseller/move-to-wallet-dialog";
+import { ResellerOrdersTable } from "@/components/reseller/reseller-orders-table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type StoreStats = {
   totalEarnings: number;
@@ -45,10 +47,14 @@ export default function ResellerDashboard() {
     totalOrders: 0,
   });
   const [loadingStats, setLoadingStats] = useState(true);
+  
+  // Orders state
+  const [ordersTab, setOrdersTab] = useState<"personal" | "store">("personal");
+  const [personalOrders, setPersonalOrders] = useState<any[]>([]);
+  const [storeOrders, setStoreOrders] = useState<any[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
 
   useEffect(() => {
-    console.log(userProfile);
-
     if (!loading && !user) {
       router.push("/login");
     }
@@ -57,8 +63,15 @@ export default function ResellerDashboard() {
   useEffect(() => {
     if (userProfile?.is_reseller) {
       fetchStats();
+      fetchOrders("personal"); // Load personal orders initially
     }
   }, [userProfile]);
+
+  useEffect(() => {
+    if (ordersTab === "store" && storeOrders.length === 0) {
+      fetchOrders("store");
+    }
+  }, [ordersTab]);
 
   const fetchStats = async () => {
     try {
@@ -71,6 +84,27 @@ export default function ResellerDashboard() {
       console.error("Failed to fetch stats:", error);
     } finally {
       setLoadingStats(false);
+    }
+  };
+
+  const fetchOrders = async (type: "personal" | "store") => {
+    if (!userProfile?.is_reseller) return;
+    
+    setLoadingOrders(true);
+    try {
+      const res = await fetch(`/api/reseller/orders?type=${type}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (type === "personal") {
+          setPersonalOrders(data.orders || []);
+        } else {
+          setStoreOrders(data.orders || []);
+        }
+      }
+    } catch (error) {
+      console.error(`Failed to fetch ${type} orders:`, error);
+    } finally {
+      setLoadingOrders(false);
     }
   };
 
@@ -92,7 +126,10 @@ export default function ResellerDashboard() {
   }
 
   if (!userProfile?.is_reseller) {
-    router.push("/profile");
+    // Use useEffect to navigate during render, not during component render
+    React.useEffect(() => {
+      router.push("/profile");
+    }, []);
     return null;
   }
 
@@ -250,6 +287,46 @@ export default function ResellerDashboard() {
               <Copy className="h-4 w-4" />
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Orders Section */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Your Orders</CardTitle>
+          <CardDescription>
+            View your personal purchases and orders from your store
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Tabs value={ordersTab} onValueChange={(v) => setOrdersTab(v as "personal" | "store")}>
+            <TabsList className="grid w-full max-w-md grid-cols-2 mb-6">
+              <TabsTrigger value="personal">
+                My Purchases ({personalOrders.length})
+              </TabsTrigger>
+              <TabsTrigger value="store">
+                Store Orders ({storeOrders.length})
+              </TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="personal">
+              <ResellerOrdersTable
+                orders={personalOrders}
+                type="personal"
+                onRefresh={() => fetchOrders("personal")}
+                loading={loadingOrders && ordersTab === "personal"}
+              />
+            </TabsContent>
+            
+            <TabsContent value="store">
+              <ResellerOrdersTable
+                orders={storeOrders}
+                type="store"
+                onRefresh={() => fetchOrders("store")}
+                loading={loadingOrders && ordersTab === "store"}
+              />
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
     </div>

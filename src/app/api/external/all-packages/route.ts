@@ -1,42 +1,25 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
+import { datakazinaAPI } from '@/lib/datakazina';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/external/all-packages
- * Fetch all available data packages from external provider
+ * Fetch all available data packages from DataKazina
  */
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const apiKey = process.env.EXTERNAL_API_KEY;
-    const apiUrl = process.env.EXTERNAL_API_URL;
-
-    if (!apiKey || !apiUrl) {
-      console.error('External API credentials not configured');
-      return NextResponse.json(
-        { error: 'Service not configured' },
-        { status: 500 }
-      );
-    }
-
-    const response = await fetch(`${apiUrl}/api/external/packages/all-packages`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'X-API-KEY': apiKey,
-      },
-    });
-
-    if (!response.ok) {
-      console.error(`External API error: ${response.status}`, await response.text());
+    const result = await datakazinaAPI.fetchDataPackages();
+    
+    if (!result.ok || !result.data) {
+      console.error('[all-packages] Failed to fetch packages from provider');
       return NextResponse.json(
         { error: 'Failed to fetch packages from provider' },
-        { status: response.status }
+        { status: result.status >= 400 ? result.status : 502 }
       );
     }
 
-    const data = await response.json();
-    return NextResponse.json(data);
+    return NextResponse.json(result.data);
   } catch (error) {
     console.error('Error in GET /api/external/all-packages:', error);
     return NextResponse.json(

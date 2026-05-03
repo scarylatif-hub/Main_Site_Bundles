@@ -89,7 +89,7 @@ export default function SignupPage() {
   async function onSubmit(data: z.infer<typeof FormSchema>) {
     setLoading(true);
     try {
-        console.log('Starting signup process for email:', data.email);
+        // Removed email logging to prevent exposing user data in console
         
         // Use server-side signup to avoid client-side Supabase auth issues
         const signupResponse = await fetch('/api/auth/signup', {
@@ -110,7 +110,7 @@ export default function SignupPage() {
             throw new Error(signupResult.details || signupResult.error || 'Sign up failed');
         }
 
-        console.log('Signup successful:', signupResult);
+        // Removed success logging to prevent exposing user data in console
 
         const { error: signInError } = await supabase.auth.signInWithPassword({
             email: data.email,

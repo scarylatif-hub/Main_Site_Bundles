@@ -8,9 +8,9 @@ export const dynamic = "force-dynamic";
 export default async function StorePage({
   params,
 }: {
-  params: { slug: string };
+  params: Promise<{ slug: string }>;
 }) {
-  const { slug } = params;
+  const { slug } = await params;
   const admin = createAdminClient();
 
 
@@ -37,8 +37,7 @@ export default async function StorePage({
   // Fetch packages from DataKazina
   const pkgResult = await datakazinaAPI.fetchDataPackages();
   if (!pkgResult.ok || !pkgResult.data) {
-    console.error("[store/page] Failed to fetch packages:", pkgResult.rawText);
-    redirect("/");
+   redirect("/");
   }
 
   // Apply profit margin to calculate selling prices
@@ -51,7 +50,6 @@ export default async function StorePage({
         const resellerCost = consolePrice * (1 + adminMarkup);
         const sellingPrice = resellerCost * (1 + profitMargin);
 
-        console.log(pkg);
 
         // Use volumeGB field for display (e.g., "2GB", "3GB")
         const displayName =

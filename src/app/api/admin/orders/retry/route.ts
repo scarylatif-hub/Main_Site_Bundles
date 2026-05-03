@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
 
   // Map frontend network ID to DataKazina network ID
   const datakazinaNetworkId = mapToDataKazinaNetworkId(Number(order.network_id));
-  console.log("[admin/retry] Network ID mapping:", { frontend: Number(order.network_id), datakazina: datakazinaNetworkId });
+  // Removed network mapping logging to prevent exposing internal logic
 
   const deliveryResult = await retryWithBackoff(
     async () => {

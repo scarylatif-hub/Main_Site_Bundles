@@ -1,11 +1,7 @@
 // src/lib/external-all-orders.ts
 
-import {
-  cheapBundlesAllOrdersRequestUrl,
-  getCheapBundlesApiKey,
-} from "@/lib/cheap-bundles-config";
-import { readFetchJson } from "@/lib/fetch-json";
-import { apiNetworkIdToDisplay } from "@/lib/network-id-map";
+import { datakazinaAPI } from "@/lib/datakazina";
+import { datakazinaNetworkIdToDisplay } from "@/lib/network-id-map";
 import { getRetailPriceGhs } from "@/lib/retail-prices";
 import { NETWORKS, normalizePhoneNumber } from "@/lib/networks";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -96,36 +92,20 @@ function extractOrdersArray(data: unknown): unknown[] | null {
 }
 
 /**
- * Fetch raw order objects from the provider `all-orders` endpoint.
+ * Fetch raw order objects from DataKazina transactions endpoint.
  */
 export async function fetchExternalAllOrdersRaw(): Promise<unknown[]> {
-  const apiKey = getCheapBundlesApiKey();
-  const url = cheapBundlesAllOrdersRequestUrl();
-  if (!apiKey || !url) {
-    console.warn("external-all-orders: missing CHEAP_BUNDLES / EXTERNAL API config");
-    return [];
-  }
-
   try {
-    const res = await fetch(url, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-        "X-API-KEY": apiKey,
-      },
-      cache: "no-store",
-    });
-
-    const { ok, status, data } = await readFetchJson(res);
-
-    if (!ok) {
-      console.error("external-all-orders HTTP", status, data);
+    const result = await datakazinaAPI.fetchTransactions();
+    
+    if (!result.ok || !result.data) {
+      console.warn("external-all-orders: DataKazina fetch failed", result.rawText);
       return [];
     }
 
-    const arr = extractOrdersArray(data);
+    const arr = extractOrdersArray(result.data);
     if (arr) return arr;
-    console.warn("external-all-orders: unexpected shape", typeof data);
+    console.warn("external-all-orders: unexpected shape", typeof result.data);
     return [];
   } catch (e) {
     console.error("external-all-orders fetch error", e);
@@ -176,7 +156,7 @@ export function normalizeExternalOrder(
   const rawNet = parseNum(pick(o, ["network_id", "networkId"]));
   let network_id: number | null = null;
   if (rawNet != null && Number.isFinite(rawNet)) {
-    network_id = apiNetworkIdToDisplay(Math.trunc(rawNet));
+    network_id = datakazinaNetworkIdToDisplay(Math.trunc(rawNet));
   } else {
     network_id = networkIdFromLabel(network_label);
   }
@@ -296,7 +276,8 @@ export function storeOrderToAdminRow(
     user_id: order.store_id,
     created_at: order.created_at,
     recipient_msisdn: order.customer_phone || order.phone_number,
-    network_id: order.network_id,
+    // Store orders use DataKazina network IDs, convert to display format
+    network_id: datakazinaNetworkIdToDisplay(order.network_id),
     network_label: null,
     bundle_amount: null, // Would need to fetch package details
     status: order.status,

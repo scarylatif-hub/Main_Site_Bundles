@@ -3,37 +3,41 @@ import { NextResponse } from 'next/server';
 import { datakazinaAPI } from '@/lib/datakazina';
 import { NETWORKS } from '@/lib/networks';
 import type { NetworkName } from '@/lib/definitions';
-import { apiNetworkIdToDisplay } from '@/lib/network-id-map';
+import { datakazinaNetworkIdToDisplay } from '@/lib/network-id-map';
+import { getRetailPriceGhs } from '@/lib/retail-prices';
 
 export const dynamic = 'force-dynamic';
 
-const ADMIN_MARKUP = 0.14; // 14% admin markup
-
 function mapDataKazinaPackages(raw: unknown[]): unknown[] {
   return raw.map((pkg: any) => {
-    const consolePrice = Number(pkg.console_price || pkg.price || 0);
-    const retailPrice = consolePrice * (1 + ADMIN_MARKUP);
-    
     const rawNetId = Number(pkg.network_id);
     const displayNetId = Number.isFinite(rawNetId)
-      ? apiNetworkIdToDisplay(Math.trunc(rawNetId))
+      ? datakazinaNetworkIdToDisplay(Math.trunc(rawNetId))
       : 1;
     const netFromId = NETWORKS.find((n) => n.id === displayNetId);
-    const networkName = (pkg.network || netFromId?.name || 'MTN') as NetworkName;
+    
+    // Normalize network name - DataKazina returns "AT - iSHare" and "AT - BigTime"
+    // but we need "AirtelTigo" for the frontend to match
+    let networkName = (pkg.network || netFromId?.name || 'MTN') as NetworkName;
+    if (networkName.includes('AT') || networkName.includes('iSHare') || networkName.includes('BigTime')) {
+      networkName = 'AirtelTigo' as NetworkName;
+    }
 
     const vol = pkg.volume || pkg.shared_bundle;
     const sharedBundle = Number(vol);
     const dataAmount = pkg.volumeGB || pkg.volume || pkg.data_amount || `${sharedBundle}GB`;
     const validity = pkg.validity || '30 days';
 
+    // Use retail price from retail-prices.ts
+    const retailPrice = getRetailPriceGhs(displayNetId, sharedBundle) || 0;
+
     return {
-      id: String(pkg.id),
+      id: String(pkg.id), // Keep DataKazina package ID for purchase
       network: { id: displayNetId, name: networkName },
       dataAmount,
       validity,
       sharedBundle: Number.isFinite(sharedBundle) ? sharedBundle : 0,
-      wholesalePrice: consolePrice,
-      price: Math.round(retailPrice * 100) / 100,
+      price: retailPrice,
     };
   });
 }
@@ -43,7 +47,7 @@ export async function GET() {
     const pkgResult = await datakazinaAPI.fetchDataPackages();
     
     if (!pkgResult.ok || !pkgResult.data) {
-      console.error('[packages] Failed to fetch from DataKazina:', pkgResult.rawText);
+      console.error('[packages] Failed to fetch packages from provider');
       return NextResponse.json(
         { error: 'Failed to fetch packages from provider' },
         { status: pkgResult.status >= 400 ? pkgResult.status : 502 }
@@ -59,7 +63,7 @@ export async function GET() {
     }
 
     const mappedPackages = mapDataKazinaPackages(pkgResult.data);
-    console.log(`Returning ${mappedPackages.length} packages from DataKazina with 14% markup`);
+    // Removed package count logging to prevent exposing API details in console
     
     return NextResponse.json(mappedPackages);
   } catch (error) {

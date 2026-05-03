@@ -16,7 +16,7 @@ async function sendNtfyNotification(title: string, message: string) {
       },
       body: message,
     });
-    console.log("[withdrawals] ntfy notification sent:", title);
+    // Removed notification logging to prevent exposing sensitive data in console
   } catch (error) {
     console.error("[withdrawals] Failed to send ntfy notification:", error);
   }

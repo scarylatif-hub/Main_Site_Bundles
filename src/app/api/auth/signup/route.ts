@@ -12,11 +12,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`Attempting signup for email: ${email}`);
+    // Removed email logging to prevent exposing user data in console
 
     const profile = await createLocalUser(email, password, fullName, phone || '');
 
-    console.log('Signup successful:', profile.email);
+    // Removed success logging to prevent exposing user data in console
 
     return NextResponse.json({
       success: true,

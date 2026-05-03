@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import {
-  cheapBundlesPackagesUrl,
-  getCheapBundlesApiKey,
-} from '@/lib/cheap-bundles-config';
-import { readFetchJson } from '@/lib/fetch-json';
+import { datakazinaAPI } from '@/lib/datakazina';
+import { displayNetworkIdToDatakazina } from '@/lib/network-id-map';
 import { normalizePhoneNumber } from '@/lib/networks';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/external/buy-other
- * Proxies provider buy-other (snake_case body per API docs).
+ * Purchase data bundle using DataKazina API
  */
 export async function POST(request: NextRequest) {
   try {
@@ -53,32 +50,28 @@ export async function POST(request: NextRequest) {
 
     const recipient_msisdn = normalizePhoneNumber(String(recipient_raw));
 
-    const apiKey = getCheapBundlesApiKey();
-    const buyUrl = cheapBundlesPackagesUrl('buy-other');
+    // Convert display network ID to DataKazina network ID
+    const datakazinaNetworkId = displayNetworkIdToDatakazina(Number(network_id));
 
-    if (!apiKey || !buyUrl) {
+    // Generate unique reference
+    const incoming_api_ref = `web-${Date.now()}-${user.id.slice(0, 8)}`;
+
+    const result = await datakazinaAPI.purchaseDataPackage({
+      recipient_msisdn,
+      network_id: datakazinaNetworkId,
+      shared_bundle: Number(shared_bundle),
+      incoming_api_ref,
+    });
+
+    if (!result.ok) {
+      console.error('[buy-other] Provider error occurred');
       return NextResponse.json(
-        { error: 'Service not configured' },
-        { status: 500 }
+        { error: 'Failed to purchase data bundle' },
+        { status: result.status >= 400 ? result.status : 502 }
       );
     }
 
-    const response = await fetch(buyUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        'X-API-KEY': apiKey,
-      },
-      body: JSON.stringify({
-        recipient_msisdn,
-        network_id: Number(network_id),
-        shared_bundle: Number(shared_bundle),
-      }),
-    });
-
-    const { status, data } = await readFetchJson(response);
-    return NextResponse.json(data ?? {}, { status: status >= 200 && status < 600 ? status : 502 });
+    return NextResponse.json(result.data ?? {}, { status: result.status });
   } catch (error) {
     console.error('Error in POST /api/external/buy-other:', error);
     return NextResponse.json(

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { datakazinaAPI } from "@/lib/datakazina";
+import { datakazinaNetworkIdToDisplay } from "@/lib/network-id-map";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,7 @@ export async function GET(
     // Fetch packages to get names
     const pkgResult = await datakazinaAPI.fetchDataPackages();
     if (!pkgResult.ok || !pkgResult.data) {
-      console.error("[store/orders] Failed to fetch packages:", pkgResult.rawText);
+      console.error("[store/orders] Failed to fetch packages from provider");
       return NextResponse.json({ error: "Failed to fetch packages" }, { status: 502 });
     }
     const packageMap = new Map(
@@ -50,6 +51,8 @@ export async function GET(
     const enrichedOrders = orders?.map((order: any) => ({
       ...order,
       package_name: packageMap.get(order.package_id) || `Package ${order.package_id}`,
+      // Convert DataKazina network IDs to display format
+      network_id: order.network_id ? datakazinaNetworkIdToDisplay(order.network_id) : null,
     })) || [];
 
     return NextResponse.json({

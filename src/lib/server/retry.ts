@@ -38,7 +38,7 @@ export async function retryWithBackoff<T>(
 
       if (attempt < maxRetries - 1) {
         const delay = baseDelayMs * Math.pow(2, attempt);
-        console.log(`[retry] Waiting ${delay}ms before next attempt…`);
+        // Removed retry delay logging to prevent exposing timing information in console
         await new Promise((r) => setTimeout(r, delay));
       }
     }

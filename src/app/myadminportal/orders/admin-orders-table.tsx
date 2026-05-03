@@ -138,6 +138,7 @@ export function AdminOrdersTable({
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [networkFilter, setNetworkFilter] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState("all"); // "all" | "direct" | "store"
 
   // Unique networks from current data for the filter dropdown
   const availableNetworks = useMemo(() => {
@@ -175,11 +176,16 @@ export function AdminOrdersTable({
         networkFilter === "all" ||
         net.toLowerCase() === networkFilter.toLowerCase();
 
+      const passesSource =
+        sourceFilter === "all" ||
+        (sourceFilter === "store" && row.isStore) ||
+        (sourceFilter === "direct" && !row.isStore);
+
       const passesSearch = rowMatchesSearch(row, search);
 
-      return passesStatus && passesNetwork && passesSearch;
+      return passesStatus && passesNetwork && passesSource && passesSearch;
     });
-  }, [rows, overrides, search, statusFilter, networkFilter]);
+  }, [rows, overrides, search, statusFilter, networkFilter, sourceFilter]);
 
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const pagedRows = useMemo(() => {
@@ -190,19 +196,22 @@ export function AdminOrdersTable({
   // Reset page when filters change
   useEffect(() => {
     setPageIndex(0);
-  }, [search, statusFilter, networkFilter]);
+  }, [search, statusFilter, networkFilter, sourceFilter]);
 
   useEffect(() => {
     setPageIndex((i) => Math.min(i, Math.max(0, pageCount - 1)));
   }, [pageCount]);
 
   const activeFilterCount =
-    (statusFilter !== "all" ? 1 : 0) + (networkFilter !== "all" ? 1 : 0);
+    (statusFilter !== "all" ? 1 : 0) + 
+    (networkFilter !== "all" ? 1 : 0) + 
+    (sourceFilter !== "all" ? 1 : 0);
 
   function clearAllFilters() {
     setSearch("");
     setStatusFilter("all");
     setNetworkFilter("all");
+    setSourceFilter("all");
     setPageIndex(0);
   }
 
@@ -261,7 +270,7 @@ export function AdminOrdersTable({
           )}
         </div>
 
-        {/* Filter dropdown: Status + Network */}
+        {/* Filter dropdown: Status + Network + Source */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" className="shrink-0 gap-2">
@@ -275,6 +284,17 @@ export function AdminOrdersTable({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuLabel>Filter by Source</DropdownMenuLabel>
+            <DropdownMenuRadioGroup
+              value={sourceFilter}
+              onValueChange={setSourceFilter}
+            >
+              <DropdownMenuRadioItem value="all">All Sources</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="direct">Direct (Main Site)</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="store">Store Orders</DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+
+            <DropdownMenuSeparator />
             <DropdownMenuLabel>Filter by Status</DropdownMenuLabel>
             <DropdownMenuRadioGroup
               value={statusFilter}
@@ -336,7 +356,8 @@ export function AdminOrdersTable({
           <Table className="w-full">
             <TableHeader>
               <TableRow className="bg-muted/80 hover:bg-muted/80">
-                <TableHead className="font-semibold uppercase text-xs whitespace-nowrap">Order ID (API)</TableHead>
+                <TableHead className="font-semibold uppercase text-xs whitespace-nowrap">Order ID</TableHead>
+                <TableHead className="font-semibold uppercase text-xs whitespace-nowrap">Source</TableHead>
                 <TableHead className="font-semibold uppercase text-xs whitespace-nowrap">Customer</TableHead>
                 <TableHead className="font-semibold uppercase text-xs whitespace-nowrap">Date</TableHead>
                 <TableHead className="font-semibold uppercase text-xs whitespace-nowrap">Beneficiary</TableHead>
@@ -361,6 +382,17 @@ export function AdminOrdersTable({
                     <TableRow key={`${row.id}-${k}`} className="hover:bg-muted/30 transition-colors">
                       <TableCell className="font-medium text-primary font-mono text-sm whitespace-nowrap">
                         #{String(apiOrderId).replace(/^#/, "").slice(0, 24)}
+                      </TableCell>
+                      <TableCell className="text-sm whitespace-nowrap">
+                        {row.isStore ? (
+                          <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200 whitespace-nowrap">
+                            Store
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 whitespace-nowrap">
+                            Direct
+                          </Badge>
+                        )}
                       </TableCell>
                       <TableCell className="text-sm whitespace-nowrap">
                         <div className="font-medium">{row.customerEmail}</div>

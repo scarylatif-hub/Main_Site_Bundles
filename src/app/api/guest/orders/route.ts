@@ -20,6 +20,7 @@ import { createAdminClient }          from "@/lib/supabase/admin";
 import { datakazinaAPI }              from "@/lib/datakazina";
 import { retryWithBackoff }           from "@/lib/server/retry";
 import { normalizePhoneNumber }       from "@/lib/networks";
+import { displayNetworkIdToDatakazina } from "@/lib/network-id-map";
 
 // ── Paystack verification ─────────────────────────────────────────────────────
 
@@ -119,17 +120,16 @@ export async function POST(req: NextRequest) {
   // 5. Resolve package from DataKazina
   const pkgResult = await datakazinaAPI.fetchDataPackages();
   if (!pkgResult.ok) {
-    console.error("[guest/orders] Failed to fetch packages:", pkgResult.rawText);
+    console.error("[guest/orders] Failed to fetch packages from provider");
     return NextResponse.json({ error: "Could not fetch available packages" }, { status: 502 });
   }
-  console.log("[guest/orders] Available packages count:", pkgResult.data.length);
-  console.log("[guest/orders] Looking for package_id:", package_id);
+  // Removed package logging to prevent exposing sensitive data in console
   const pkg = pkgResult.data.find((p) => String(p.id) === String(package_id));
   if (!pkg) {
-    console.error("[guest/orders] Package not found. Available IDs:", pkgResult.data.map(p => p.id));
+    console.error("[guest/orders] Package not found.");
     return NextResponse.json({ error: "Package not found" }, { status: 404 });
   }
-  console.log("[guest/orders] Found package:", pkg);
+  // Removed package logging to prevent exposing sensitive data in console
 
   // 6. Normalise phone number
   const recipient_msisdn = normalizePhoneNumber(String(phone_number));
@@ -164,9 +164,9 @@ export async function POST(req: NextRequest) {
   // 8. Call DataKazina (with retry)
   const dakazinaRef = `guest-${newOrder.id}`;
 
-  // Client already sends DataKazina network IDs, no mapping needed
-  const datakazinaNetworkId = Number(network_id);
-  console.log("[guest/orders] Using network_id:", datakazinaNetworkId);
+  // Map display network ID to DataKazina network ID
+  const datakazinaNetworkId = displayNetworkIdToDatakazina(Number(network_id));
+  // Removed network mapping logging to prevent exposing internal logic
 
   const purchaseParams = {
     recipient_msisdn,
@@ -174,21 +174,16 @@ export async function POST(req: NextRequest) {
     shared_bundle: Number(pkg.id),
     incoming_api_ref: dakazinaRef,
   };
-  console.log("[guest/orders] Calling DataKazina with:", purchaseParams);
+  // Removed parameter logging to prevent exposing API call details
 
   const deliveryResult = await retryWithBackoff(
     async () => {
       const res = await datakazinaAPI.purchaseDataPackage(purchaseParams);
 
-      console.log("[guest/orders] DataKazina response:", {
-        ok: res.ok,
-        status: res.status,
-        data: res.ok ? res.data : null,
-        rawText: res.ok ? "" : res.rawText,
-      });
+      // Removed response logging to prevent exposing API responses in console
 
       if (!res.ok) {
-        throw new Error(res.rawText || `DataKazina error ${res.status}`);
+        throw new Error(`Provider error ${res.status}`);
       }
       if (!res.data.transaction_code && !res.data.reference) {
         throw new Error(String(res.data.message ?? "No transaction code in response"));
@@ -227,7 +222,7 @@ export async function POST(req: NextRequest) {
     deliveryResult.data.reference ??
     dakazinaRef;
 
-  console.log("[guest/orders] Updating order to completed:", providerCode);
+  // Removed success logging to prevent exposing transaction codes
 
   // Calculate reseller profit before updating order
   const adminMarkup    = 0.14;
@@ -235,13 +230,7 @@ export async function POST(req: NextRequest) {
   const resellerCost   = consolePrice * (1 + adminMarkup);
   const resellerProfit = Number(amount) - resellerCost;
 
-  console.log("[guest/orders] Profit calculation:", {
-    amountPaid: Number(amount),
-    consolePrice,
-    adminMarkup,
-    resellerCost,
-    resellerProfit,
-  });
+  // Removed profit calculation logging to prevent exposing financial data
 
   await admin
     .from("orders")
@@ -253,7 +242,7 @@ export async function POST(req: NextRequest) {
     })
     .eq("id", newOrder.id);
 
-  console.log("[guest/orders] Order updated successfully with profit:", resellerProfit);
+  // Removed profit logging to prevent exposing financial data in console
 
   // Credit reseller profit to wallet (non-blocking — failure here must not affect the response)
   if (resellerProfit > 0) {
@@ -277,7 +266,7 @@ async function creditResellerWallet(
   profit:     number
 ): Promise<void> {
   if (profit <= 0) {
-    console.log("[guest/orders] No profit to credit, skipping wallet update");
+    // Removed profit logging to prevent exposing financial data in console
     return;
   }
 
@@ -285,13 +274,6 @@ async function creditResellerWallet(
   // here because the wallet credit is non-critical (can be reconciled manually).
   const currentBalance = Number(storeOwner.wallet_balance ?? 0);
   const newBalance = currentBalance + profit;
-
-  console.log("[guest/orders] Crediting reseller wallet:", {
-    storeId: storeOwner.id,
-    currentBalance,
-    profitToAdd: profit,
-    newBalance,
-  });
 
   const { error } = await admin
     .from("profiles")
@@ -303,5 +285,5 @@ async function creditResellerWallet(
     throw error;
   }
 
-  console.log("[guest/orders] Wallet credit successful");
+  // Removed success logging to prevent exposing transaction details
 }

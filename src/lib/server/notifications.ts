@@ -41,7 +41,7 @@ async function ntfyPost(
       const t = await res.text().catch(() => "");
       console.error(`ntfy error [${res.status}] ${url}:`, t.slice(0, 300));
     } else {
-      console.log(`ntfy sent OK → ${url} | "${title}"`);
+      // Removed notification logging to prevent exposing sensitive data in console
     }
     return res.ok;
   } catch (e) {

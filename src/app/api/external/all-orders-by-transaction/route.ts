@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { isAdminEmail } from '@/lib/admin-config';
-import {
-  cheapBundlesPackagesUrl,
-  getCheapBundlesApiKey,
-} from '@/lib/cheap-bundles-config';
-import { readFetchJson } from '@/lib/fetch-json';
+import { datakazinaAPI } from '@/lib/datakazina';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/external/all-orders-by-transaction?transactionId=
  * Admin: any transaction. User: only if that transaction_code belongs to them.
+ * Uses DataKazina API to fetch transaction details.
  */
 export async function GET(request: NextRequest) {
   const transactionId = request.nextUrl.searchParams.get('transactionId');
@@ -46,31 +43,20 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const apiKey = getCheapBundlesApiKey();
-  const base = cheapBundlesPackagesUrl('all-orders-by-transaction');
-
-  if (!apiKey || !base) {
-    return NextResponse.json(null, { status: 200 });
-  }
-
   try {
-    const url = `${base}?transactionId=${encodeURIComponent(transactionId)}`;
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: {
-        Accept: 'application/json',
-        'X-API-KEY': apiKey,
-      },
-      cache: 'no-store',
-    });
-
-    const { ok, data } = await readFetchJson(response);
-
-    if (!ok) {
+    // Fetch all transactions from DataKazina and filter by reference
+    const result = await datakazinaAPI.fetchTransactions();
+    
+    if (!result.ok || !result.data) {
       return NextResponse.json(null, { status: 200 });
     }
 
-    return NextResponse.json(data);
+    // Find transaction matching the transactionId (incoming_api_ref)
+    const matchingTransaction = result.data.find(
+      (t: any) => t.incoming_api_ref === transactionId || t.id === transactionId
+    );
+
+    return NextResponse.json(matchingTransaction || null);
   } catch (error) {
     console.error('Error in GET /api/external/all-orders-by-transaction:', error);
     return NextResponse.json(null, { status: 200 });

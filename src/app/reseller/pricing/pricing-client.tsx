@@ -8,30 +8,19 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { toast } from "@/hooks/use-toast";
+import { Badge } from "@/components/ui/badge";
 import { Package } from "@/lib/definitions";
+import { Store, Globe } from "lucide-react";
 
 interface PricingClientProps {
   userId: string;
   currentMarkup: number;
 }
 
-// Example package prices from DataKazina
-const EXAMPLE_PACKAGES = [
-  { name: "1GB Data Bundle", cost: 5.0 },
-  { name: "2GB Data Bundle", cost: 10.0 },
-  { name: "5GB Data Bundle", cost: 20.0 },
-];
-
 export default function PricingClient({
   userId,
   currentMarkup,
 }: PricingClientProps) {
-  const [markup, setMarkup] = useState(currentMarkup * 100);
-  const [saving, setSaving] = useState(false);
   const [allPackages, setAllPackages] = useState<Package[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -53,139 +42,97 @@ export default function PricingClient({
     fetchPackages();
   }, []);
 
-  const handleSaveMarkup = async () => {
-    const markupPercent = Number(markup);
-    if (markupPercent < 5 || markupPercent > 20) {
-      toast({
-        title: "Invalid Markup",
-        description: "Markup must be between 5% and 20%",
-        variant: "destructive",
-      });
-      return;
-    }
+  // Group packages by network
+  const packagesByNetwork = allPackages.reduce((acc, pkg) => {
+    const network = pkg.network.name;
+    if (!acc[network]) acc[network] = [];
+    acc[network].push(pkg);
+    return acc;
+  }, {} as Record<string, Package[]>);
 
-    setSaving(true);
-    try {
-      const response = await fetch("/api/reseller/markup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profit_margin: markupPercent / 100 }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to save markup");
-      }
-
-      toast({
-        title: "Success",
-        description: "Markup saved successfully",
-        variant: "default",
-      });
-    } catch (error) {
-      console.error("Error saving markup:", error);
-      toast({
-        title: "Error",
-        description:
-          error instanceof Error ? error.message : "Failed to save markup",
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const calculateSellingPrice = (cost: number) => {
-    return cost * (1 + markup / 100);
-  };
+  // Sort networks: MTN, AirtelTigo, Telecel
+  const networkOrder = ["MTN", "AirtelTigo", "Telecel"];
+  const sortedNetworks = Object.keys(packagesByNetwork).sort(
+    (a, b) => networkOrder.indexOf(a) - networkOrder.indexOf(b)
+  );
 
   return (
     <div className="container mx-auto max-w-4xl px-4 py-8">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold">Manage Store Prices</h1>
+        <h1 className="text-2xl font-bold">Your Store Prices</h1>
         <p className="text-muted-foreground">
-          Set your profit margin. This percentage markup will apply to all
-          packages.
+          Your customers will see the same prices as the main website. 
+          All data bundles are sold at standard retail prices.
         </p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Profit Margin</CardTitle>
+      {/* Info Card */}
+      <Card className="mb-6 border-emerald-200 bg-emerald-50/30">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Store className="h-5 w-5" />
+            Store Pricing
+          </CardTitle>
           <CardDescription>
-            Set your markup percentage (5% - 20%). This will be applied to all
-            package prices. Example: If a package costs GHS 10 and you set 10%
-            markup, customers will pay GHS 11.
+            Your store sells data bundles at the same prices as the main website.
+            No markup or hidden fees.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="markup">Markup Percentage</Label>
-              <div className="flex items-center gap-4 mt-2">
-                <Input
-                  id="markup"
-                  type="number"
-                  step="0.1"
-                  min={5}
-                  max={20}
-                  value={markup}
-                  onChange={(e) => setMarkup(Number(e.target.value))}
-                  className="w-32"
-                />
-                <span className="text-sm text-muted-foreground">%</span>
-              </div>
-              <p className="text-xs text-muted-foreground mt-2">
-                Current markup: {currentMarkup * 100}%
-              </p>
-            </div>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Globe className="h-4 w-4" />
+            <span>Same prices as bundle-ghana.vercel.app</span>
+          </div>
+        </CardContent>
+      </Card>
 
-            <div className="border rounded-lg p-4 bg-muted/50">
-              <p className="text-sm font-medium mb-3">Live Price Examples</p>
-              <div className="space-y-2">
-                {isLoading ? (
-                  <p className="text-sm text-muted-foreground">
-                    Loading packages...
-                  </p>
-                ) : allPackages.length !== 0 ? (
-                  allPackages.map((pkg, index) => (
-                    <div
-                      key={index}
-                      className="flex justify-between items-center text-sm"
-                    >
-                      <span className="text-muted-foreground">
-                        {pkg.network.name} {pkg.dataAmount}
-                      </span>
-                      <div className="text-right grid ">
-                        <div className="text-muted-foreground flex justify-end">
-                          Cost: GHS{" "}
-                          {parseFloat(pkg.price.toString()).toFixed(2)}
-                        </div>
-                        <div className="font-semibold">
-                          Selling: GHS{" "}
-                          {calculateSellingPrice(
-                            parseFloat(pkg.price.toString()),
-                          ).toFixed(2)}
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <div className="">
-                    <p className="text-sm text-muted-foreground">
-                      No packages available to show examples.
-                    </p>
-                  </div>
-                )}
-              </div>
+      {/* Price List */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Data Bundle Prices</CardTitle>
+          <CardDescription>
+            These are the prices your customers will see in your store.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {isLoading ? (
+            <div className="space-y-4">
+              <div className="h-12 bg-muted rounded animate-pulse" />
+              <div className="h-12 bg-muted rounded animate-pulse" />
+              <div className="h-12 bg-muted rounded animate-pulse" />
             </div>
-          </div>
-          <div className="mt-6 flex justify-end">
-            <Button onClick={handleSaveMarkup} disabled={saving}>
-              {saving ? "Saving..." : "Save Markup"}
-            </Button>
-          </div>
+          ) : (
+            <div className="space-y-6">
+              {sortedNetworks.map((network) => (
+                <div key={network}>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Badge variant="outline" className={
+                      network === "MTN" ? "bg-yellow-50 text-yellow-800 border-yellow-200" :
+                      network === "AirtelTigo" ? "bg-blue-50 text-blue-800 border-blue-200" :
+                      "bg-red-50 text-red-800 border-red-200"
+                    }>
+                      {network}
+                    </Badge>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                    {packagesByNetwork[network]
+                      .sort((a, b) => parseFloat(a.dataAmount) - parseFloat(b.dataAmount))
+                      .map((pkg) => (
+                        <div
+                          key={pkg.id}
+                          className="border rounded-lg p-3 bg-muted/30 flex flex-col justify-between"
+                        >
+                          <div className="text-sm font-medium">{pkg.dataAmount}</div>
+                          <div className="text-lg font-bold text-primary">
+                            GHS {parseFloat(pkg.price.toString()).toFixed(2)}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

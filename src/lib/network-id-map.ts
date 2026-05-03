@@ -1,15 +1,24 @@
 /**
- * Provider API swaps MTN vs AirtelTigo network_id vs our app (1=MTN, 2=Telecel, 3=AirtelTigo).
- * Map API → display and display → API for buy-other.
+ * DataKazina API network IDs vs our app display format.
+ * Display format: MTN=1, Telecel=2, AirtelTigo=3
+ * 
+ * Actual DataKazina format from API:
+ * - MTN: 3
+ * - Telecel: 2
+ * - AirtelTigo (AT - iSHare): 1
+ * - AirtelTigo (AT - BigTime): 4
  */
-export function apiNetworkIdToDisplay(apiNetworkId: number): number {
-  if (apiNetworkId === 1) return 3;
-  if (apiNetworkId === 3) return 1;
-  return apiNetworkId;
+export function datakazinaNetworkIdToDisplay(datakazinaNetworkId: number): number {
+  if (datakazinaNetworkId === 3) return 1;  // DataKazina MTN → Display MTN
+  if (datakazinaNetworkId === 2) return 2;  // DataKazina Telecel → Display Telecel
+  if (datakazinaNetworkId === 1) return 3;  // DataKazina AT-iSHare → Display AirtelTigo
+  if (datakazinaNetworkId === 4) return 3;  // DataKazina AT-BigTime → Display AirtelTigo
+  return datakazinaNetworkId;
 }
 
-export function displayNetworkIdToApi(displayNetworkId: number): number {
-  if (displayNetworkId === 1) return 3;
-  if (displayNetworkId === 3) return 1;
+export function displayNetworkIdToDatakazina(displayNetworkId: number): number {
+  if (displayNetworkId === 1) return 3;  // Display MTN → DataKazina MTN
+  if (displayNetworkId === 2) return 2;  // Display Telecel → DataKazina Telecel
+  if (displayNetworkId === 3) return 1;  // Display AirtelTigo → DataKazina AT-iSHare (use iSHare as default)
   return displayNetworkId;
 }

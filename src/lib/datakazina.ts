@@ -74,7 +74,7 @@ class DataKazinaAPI {
     const baseUrl = useMainEndpoint && MAIN_BASE_URL ? MAIN_BASE_URL : BASE_URL;
     const url = `${baseUrl}${path}`;
     const endpointLabel = useMainEndpoint && MAIN_BASE_URL ? " (main endpoint)" : "";
-    console.log(`[datakazina] ${options.method ?? "GET"} ${url}${endpointLabel}`);
+    // Removed URL logging to prevent exposing API endpoints in console
 
     try {
       const response = await fetch(url, {
@@ -84,7 +84,7 @@ class DataKazinaAPI {
 
       // Always capture the raw text first — the response might not be JSON
       const rawText = await response.text();
-      console.log(`[datakazina] ${response.status} raw:`, rawText.slice(0, 400));
+      // Removed raw response logging to prevent exposing API responses in console
 
       if (!response.ok) {
         return { ok: false, data: null, status: response.status, rawText };
@@ -96,7 +96,7 @@ class DataKazinaAPI {
         parsed = rawText.trim() ? JSON.parse(rawText) : {};
       } catch {
         // 2xx but non-JSON body — still a success
-        console.warn("[datakazina] 2xx response was not JSON:", rawText.slice(0, 200));
+        console.warn("[datakazina] 2xx response was not JSON");
         parsed = { raw: rawText };
       }
 
@@ -147,13 +147,10 @@ class DataKazinaAPI {
    * `/buy-data-package?=null` which means the server may require a
    * query string to be present (even empty). We send `?` to satisfy that.
    *
-   * Response shape is undocumented — we log rawText so you can see
-   * exactly what comes back the first time it runs.
-   *
    * @param useMainEndpoint - If true, uses DATAKAZINA_MAIN_BASE_URL instead of DATAKAZINA_BASE_URL
    */
   purchaseDataPackage(params: PurchaseParams, useMainEndpoint: boolean = false): Promise<DKResult> {
-    console.log("[datakazina] purchaseDataPackage params:", params);
+    // Removed param logging to prevent exposing sensitive data in console
     return this.request("/buy-data-package?", {
       method: "POST",
       body:   JSON.stringify(params),
@@ -164,7 +161,7 @@ class DataKazinaAPI {
    * POST /buy-bulk-data-packages
    */
   purchaseBulkDataPackages(params: { orders: PurchaseParams[] }): Promise<DKResult> {
-    console.log("[datakazina] purchaseBulkDataPackages count:", params.orders.length);
+    // Removed count logging to prevent exposing sensitive data in console
     return this.request("/buy-bulk-data-packages", {
       method: "POST",
       body:   JSON.stringify(params),
