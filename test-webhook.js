@@ -1,7 +1,7 @@
 // Test script for Dakazina webhook integration
 // Run with: node test-webhook.js
 
-const webhookUrl = 'http://localhost:3000/api/webhooks/dakazina';
+const webhookUrl = 'https://sbbundles-main.vercel.app/api/webhooks/dakazina';
 const webhookSecret = process.env.DAKAZINA_WEBHOOK_SECRET || 'a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456';
 
 // Example webhook payload from Dakazina
