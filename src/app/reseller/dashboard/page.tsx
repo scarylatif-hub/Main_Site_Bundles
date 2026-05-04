@@ -209,9 +209,12 @@ export default function ResellerDashboard() {
             <Button
               variant="outline"
               className="flex-1 h-16 flex-col gap-1 sm:flex-row sm:gap-2 sm:h-12"
-              onClick={() =>
-                window.open(`/store/${userProfile?.store_name}`, "_blank")
-              }
+              onClick={() => {
+                const storeUrl = userProfile?.reseller_slug 
+                  ? `https://${process.env.NEXT_PUBLIC_STORE_DOMAIN || "bundles-store.vercel.app"}/store/${userProfile.reseller_slug}`
+                  : "#";
+                window.open(storeUrl, "_blank");
+              }}
             >
               <Eye className="h-4 w-4" />
               <span className="text-sm">View Store</span>
