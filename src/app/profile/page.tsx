@@ -17,7 +17,8 @@ import { useAuth } from "@/context/auth-context";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AVATAR_OPTIONS, buildAvatarUrl } from "@/lib/avatars";
-import type { Profile } from "@/context/auth-context";
+import type { Profile } from "@/lib/definitions";
+import { getStoreUrl } from "@/lib/app-config";
 import {
   Dialog,
   DialogContent,
@@ -84,7 +85,7 @@ export default function ProfilePage() {
     setSavingAvatarId(avatarId);
 
     // Optimistic update — show the new avatar immediately
-    setLocalProfile((prev) =>
+    setLocalProfile((prev: Profile | null) =>
       prev ? { ...prev, avatar_url: nextAvatarUrl } : prev
     );
 
@@ -107,8 +108,8 @@ export default function ProfilePage() {
       refreshUser();
     } catch (e) {
       // Roll back optimistic update on failure
-      setLocalProfile((prev) =>
-        prev ? { ...prev, avatar_url: previousAvatarUrl || null } : prev
+      setLocalProfile((prev: Profile | null) =>
+        prev ? { ...prev, avatar_url: previousAvatarUrl || undefined } : prev
       );
       setAvatarError(
         e instanceof Error ? e.message : "Could not save avatar. Please try again."
@@ -280,7 +281,7 @@ export default function ProfilePage() {
                             title="Only lowercase letters, numbers, and hyphens allowed"
                           />
                           <p className="text-xs text-muted-foreground mt-1">
-                            Your store URL: /store/{storeSlug || "your-slug"}
+                            Your store URL: {storeSlug ? getStoreUrl(storeSlug) : "/store/your-slug"}
                           </p>
                         </div>
                         <div className="flex gap-2 justify-end">
@@ -308,7 +309,7 @@ export default function ProfilePage() {
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">Store URL:</span>
                     <span className="text-sm text-muted-foreground">
-                      /store/{userProfile?.reseller_slug || "—"}
+                      {userProfile?.reseller_slug ? getStoreUrl(userProfile.reseller_slug) : "—"}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { toast } from "@/hooks/use-toast";
-import type { Profile } from "@/context/auth-context";
+import type { Profile } from "@/lib/definitions";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

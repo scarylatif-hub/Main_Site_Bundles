@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/auth-context";
 import { PageHeader } from "@/components/page-header";
 import { toast } from "@/hooks/use-toast";
+import { getStoreUrl } from "@/lib/app-config";
 import {
   Card,
   CardContent,
@@ -109,7 +110,7 @@ export default function ResellerDashboard() {
   };
 
   const copyStoreUrl = () => {
-    const url = `${window.location.origin}/store/${userProfile?.store_name}`;
+    const url = userProfile?.reseller_slug ? getStoreUrl(userProfile.reseller_slug) : "";
     navigator.clipboard.writeText(url);
     toast({
       title: "Copied to clipboard",
@@ -133,7 +134,7 @@ export default function ResellerDashboard() {
     return null;
   }
 
-  const storeUrl = `${window.location.origin}/store/${userProfile?.store_name}`;
+  const storeUrl = userProfile?.reseller_slug ? getStoreUrl(userProfile.reseller_slug) : "";
 
   return (
     <div className="container mx-auto max-w-6xl px-4 py-8">

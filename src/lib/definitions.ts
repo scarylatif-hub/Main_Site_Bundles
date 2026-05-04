@@ -58,6 +58,9 @@ export type Profile = {
   is_admin: boolean;
   is_reseller?: boolean;
   store_name?: string;
+  reseller_slug?: string;
   reseller_approved?: boolean;
+  store_active?: boolean;
+  avatar_url?: string;
   updated_at: string;
 };
