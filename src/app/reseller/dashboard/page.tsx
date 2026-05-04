@@ -28,6 +28,7 @@ import { WithdrawalDialog } from "@/components/reseller/withdrawal-dialog";
 import { MoveToWalletDialog } from "@/components/reseller/move-to-wallet-dialog";
 import { ResellerOrdersTable } from "@/components/reseller/reseller-orders-table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Profile } from "@/lib/definitions";
 
 type StoreStats = {
   totalEarnings: number;
