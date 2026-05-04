@@ -38,7 +38,7 @@ type StoreStats = {
 };
 
 export default function ResellerDashboard() {
-  const { user, userProfile, loading } = useAuth();
+  const { user, userProfile, loading, logout, refreshUser } = useAuth();
   const router = useRouter();
   const [stats, setStats] = useState<StoreStats>({
     totalEarnings: 0,
@@ -48,6 +48,20 @@ export default function ResellerDashboard() {
     totalOrders: 0,
   });
   const [loadingStats, setLoadingStats] = useState(true);
+  const [loadingTimeout, setLoadingTimeout] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (loading) {
+        setLoadingTimeout(true);
+      }
+    }, 5000); // 5 second timeout
+
+    return () => clearTimeout(timer);
+  }, [loading]);
+
+  const [localProfile, setLocalProfile] = useState<Profile | null>(null);
+
   
   // Orders state
   const [ordersTab, setOrdersTab] = useState<"personal" | "store">("personal");
@@ -120,10 +134,10 @@ export default function ResellerDashboard() {
     });
   };
 
-  if (loading || !user) {
+  if ((loading && !loadingTimeout) || !user) {
     return (
       <div className="flex justify-center items-center h-screen">
-        <div>Loading...</div>
+        <div>{loadingTimeout ? "Taking longer than expected..." : "Loading..."}</div>
       </div>
     );
   }

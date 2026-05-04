@@ -47,13 +47,12 @@ async function fetchProfile(userId: string): Promise<Profile | null> {
     // 406 = no row found (expected for brand new users before profile is created)
     if (error && status !== 406) {
       // Handle lock broken errors gracefully - these are temporary Supabase session conflicts
-      if (error.message.includes("Lock broken") || error.message.includes("steal")) {
+      if (error.message.includes("Lock broken") || error.message.includes("steal") || error.message.includes("orphaned lock")) {
         console.warn("fetchProfile: Temporary session conflict, retrying...");
-        // Retry once after a short delay
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 200));
         return fetchProfile(userId);
       }
-      console.error("fetchProfile error:", error.message);
+      console.error("fetchProfile error:", error);
       return null;
     }
 
@@ -66,9 +65,9 @@ async function fetchProfile(userId: string): Promise<Profile | null> {
     } as Profile;
   } catch (e) {
     // Handle lock broken errors at the catch level too
-    if (e instanceof Error && (e.message.includes("Lock broken") || e.message.includes("steal"))) {
+    if (e instanceof Error && (e.message.includes("Lock broken") || e.message.includes("steal") || e.message.includes("orphaned lock"))) {
       console.warn("fetchProfile: Temporary session conflict in catch, retrying...");
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await new Promise(resolve => setTimeout(resolve, 200));
       return fetchProfile(userId);
     }
     console.error("fetchProfile unexpected error:", e);

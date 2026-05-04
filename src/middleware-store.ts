@@ -10,10 +10,15 @@ export function middleware(req: NextRequest) {
 
   const { pathname } = req.nextUrl;
   
+  // Block root path in store mode - only allow /store/[slug]
+  if (pathname === "/") {
+    return NextResponse.redirect(new URL("/store", req.url));
+  }
+  
   // Check if current path is accessible in store mode
   if (!isPathAccessible(pathname)) {
-    // Redirect to home page for store app
-    return NextResponse.redirect(new URL("/", req.url));
+    // Redirect to store page for store app
+    return NextResponse.redirect(new URL("/store", req.url));
   }
 
   return NextResponse.next();
