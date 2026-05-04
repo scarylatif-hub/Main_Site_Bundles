@@ -20,17 +20,24 @@ Update your Dakazina webhook configuration with the following:
 
 **Rate Limit:** 100/min (as configured)
 
-### Environment Variables
-Add the following environment variable to **BOTH** Vercel deployments:
+### Required Environment Variables (Both Sites)
+```
+# Paystack (NEVER commit these)
+NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY=pk_test_xxxxxxxxxx
+PAYSTACK_SECRET_KEY=sk_test_xxxxxxxxxx
 
-**Main Site (sbbundles-main.vercel.app):**
-```
+# Dakazina Webhook
 DAKAZINA_WEBHOOK_SECRET=a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456
-```
 
-**Store Site (bundles-store.vercel.app):**
-```
-DAKAZINA_WEBHOOK_SECRET=a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...
+
+# DataKazina
+DATAKAZINA_API_KEY=your-api-key
+DATAKAZINA_BASE_URL=https://reseller.dakazinabusinessconsult.com/api/v1
+DATAKAZINA_MAIN_BASE_URL=https://reseller.dakazinabusinessconsult.com/api/v1
 ```
 
 > **Important:** Use the same secret value for both sites since they share the same codebase.

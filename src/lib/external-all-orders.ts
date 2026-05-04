@@ -96,7 +96,17 @@ function extractOrdersArray(data: unknown): unknown[] | null {
  */
 export async function fetchExternalAllOrdersRaw(): Promise<unknown[]> {
   try {
+    console.log("external-all-orders: Starting fetch from DataKazina...");
     const result = await datakazinaAPI.fetchTransactions();
+    
+    console.log("external-all-orders: Fetch result:", {
+      ok: result.ok,
+      status: result.status,
+      hasData: !!result.data,
+      dataType: typeof result.data,
+      isArray: Array.isArray(result.data),
+      rawLength: result.rawText?.length
+    });
     
     if (!result.ok || !result.data) {
       console.warn("external-all-orders: DataKazina fetch failed", result.rawText);
@@ -104,6 +114,12 @@ export async function fetchExternalAllOrdersRaw(): Promise<unknown[]> {
     }
 
     const arr = extractOrdersArray(result.data);
+    console.log("external-all-orders: Extracted array:", {
+      isArray: Array.isArray(arr),
+      length: arr?.length,
+      sampleItem: arr?.[0]
+    });
+    
     if (arr) return arr;
     console.warn("external-all-orders: unexpected shape", typeof result.data);
     return [];
@@ -155,10 +171,21 @@ export function normalizeExternalOrder(
   const network_label = netVal != null ? String(netVal).trim() : null;
   const rawNet = parseNum(pick(o, ["network_id", "networkId"]));
   let network_id: number | null = null;
+  
+  console.log("Network mapping debug:", {
+    rawNet,
+    network_label,
+    parsedRawNet: rawNet != null && Number.isFinite(rawNet) ? Math.trunc(rawNet) : null
+  });
+  
   if (rawNet != null && Number.isFinite(rawNet)) {
-    network_id = datakazinaNetworkIdToDisplay(Math.trunc(rawNet));
+    const displayId = datakazinaNetworkIdToDisplay(Math.trunc(rawNet));
+    network_id = displayId;
+    console.log("Network ID from raw number:", rawNet, "→", displayId);
   } else {
-    network_id = networkIdFromLabel(network_label);
+    const labelId = networkIdFromLabel(network_label);
+    network_id = labelId;
+    console.log("Network ID from label:", network_label, "→", labelId);
   }
 
   const volVal = pick(o, [

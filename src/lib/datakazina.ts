@@ -131,7 +131,7 @@ class DataKazinaAPI {
 
   /** GET /fetch-transactions */
   fetchTransactions(): Promise<DKResult<unknown[]>> {
-    return this.request<unknown[]>("/fetch-transactions");
+    return this.request<unknown[]>("/fetch-transactions", {}, true); // Use main endpoint for main site orders
   }
 
   /** GET /check-console-balance */
