@@ -110,8 +110,10 @@ export default function ResellerDashboard() {
   };
 
   const copyStoreUrl = () => {
-    const url = userProfile?.reseller_slug ? getStoreUrl(userProfile.reseller_slug) : "";
-    navigator.clipboard.writeText(url);
+    const baseUrl = process.env.NEXT_PUBLIC_STORE_DOMAIN || "bundles-store.vercel.app";
+    const storePath = userProfile?.reseller_slug ? `/store/${userProfile.reseller_slug}` : "";
+    const fullUrl = `https://${baseUrl}${storePath}`;
+    navigator.clipboard.writeText(fullUrl);
     toast({
       title: "Copied to clipboard",
       description: "Store URL has been copied to your clipboard.",
@@ -134,7 +136,7 @@ export default function ResellerDashboard() {
     return null;
   }
 
-  const storeUrl = userProfile?.reseller_slug ? getStoreUrl(userProfile.reseller_slug) : "";
+  const storeUrl = userProfile?.reseller_slug ? `https://${process.env.NEXT_PUBLIC_STORE_DOMAIN || "bundles-store.vercel.app"}/store/${userProfile.reseller_slug}` : "";
 
   return (
     <div className="container mx-auto max-w-6xl px-4 py-8">

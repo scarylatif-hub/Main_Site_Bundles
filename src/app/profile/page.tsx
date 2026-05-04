@@ -281,7 +281,7 @@ export default function ProfilePage() {
                             title="Only lowercase letters, numbers, and hyphens allowed"
                           />
                           <p className="text-xs text-muted-foreground mt-1">
-                            Your store URL: {storeSlug ? getStoreUrl(storeSlug) : "/store/your-slug"}
+                            Your store URL: {storeSlug ? `https://${process.env.NEXT_PUBLIC_STORE_DOMAIN || "bundles-store.vercel.app"}/store/${storeSlug}` : "/store/your-slug"}
                           </p>
                         </div>
                         <div className="flex gap-2 justify-end">
@@ -309,7 +309,7 @@ export default function ProfilePage() {
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">Store URL:</span>
                     <span className="text-sm text-muted-foreground">
-                      {userProfile?.reseller_slug ? getStoreUrl(userProfile.reseller_slug) : "—"}
+                      {userProfile?.reseller_slug ? `https://${process.env.NEXT_PUBLIC_STORE_DOMAIN || "bundles-store.vercel.app"}/store/${userProfile.reseller_slug}` : "—"}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">

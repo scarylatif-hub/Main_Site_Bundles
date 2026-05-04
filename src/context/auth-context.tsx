@@ -13,6 +13,7 @@ import {
 import { supabase } from "@/lib/supabase/client";
 import { type User, type Session } from "@supabase/supabase-js";
 import type { Profile } from "@/lib/definitions";
+import { useRouter } from "next/navigation";
 
 // Simple debounce function
 function debounce<T extends (...args: any[]) => any>(func: T, wait: number): T {
@@ -76,6 +77,7 @@ async function fetchProfile(userId: string): Promise<Profile | null> {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const router = useRouter();
   const [user, setUser]               = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<Profile | null>(null);
   const [session, setSession]         = useState<Session | null>(null);
@@ -148,7 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch {
         await supabase.auth.signOut();
       }
-      window.location.assign("/login");
+      router.push("/login");
     } catch (e) {
       console.error("logout error:", e);
       setLoading(false);

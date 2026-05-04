@@ -25,7 +25,7 @@ import {
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { sanitizeSearchParamsString } from "@/lib/sanitize-auth-search-params";
 
 const FormSchema = z.object({
@@ -36,6 +36,7 @@ const FormSchema = z.object({
 function LoginForm() {
   const { toast } = useToast();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -95,7 +96,7 @@ function LoginForm() {
 
       // Session cookies were set on this response by the API route — no client setSession
       // (prevents Supabase navigator.locks races with AuthProvider).
-      window.location.assign(safeNextPath());
+      router.push(safeNextPath());
     } catch (error: unknown) {
       console.error("Login Error:", error);
       toast({
