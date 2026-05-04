@@ -20,8 +20,8 @@ export function getStoreUrl(resellerSlug: string): string {
     // Main app uses relative path or same domain
     return `/store/${resellerSlug}`;
   } else {
-    // Store app uses custom domain
-    return `https://${STORE_DOMAIN}/${resellerSlug}`;
+    // Store app uses custom domain with /store prefix
+    return `https://${STORE_DOMAIN}/store/${resellerSlug}`;
   }
 }
 
