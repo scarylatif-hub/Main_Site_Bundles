@@ -5,6 +5,7 @@ import { datakazinaNetworkIdToDisplay } from "@/lib/network-id-map";
 import StoreClient from "./store-client";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0; // Disable caching
 
 export default async function StorePage({
   params,
@@ -41,6 +42,20 @@ export default async function StorePage({
    redirect("/");
   }
 
+  // Fetch custom reseller prices
+  const { data: resellerPrices } = await admin
+    .from("reseller_prices")
+    .select("package_id, selling_price")
+    .eq("reseller_id", storeOwner.id);
+
+  // Create a map of package_id to custom selling price
+  const customPriceMap = new Map<number, number>();
+  if (resellerPrices) {
+    resellerPrices.forEach((price) => {
+      customPriceMap.set(price.package_id, price.selling_price);
+    });
+  }
+
   // Apply profit margin to calculate selling prices
   const profitMargin = Number(storeOwner.profit_margin || 0.05);
   const adminMarkup = 0.14; // 14% admin markup for main website
@@ -49,7 +64,9 @@ export default async function StorePage({
     ? pkgResult.data.map((pkg: any) => {
         const consolePrice = Number(pkg.console_price || pkg.price || 0);
         const resellerCost = consolePrice * (1 + adminMarkup);
-        const sellingPrice = resellerCost * (1 + profitMargin);
+        
+        // Use custom price if available, otherwise calculate with profit margin
+        const sellingPrice = customPriceMap.get(Number(pkg.id)) || (resellerCost * (1 + profitMargin));
 
         // Convert DataKazina network ID to display network ID
         const displayNetworkId = datakazinaNetworkIdToDisplay(Number(pkg.network_id));

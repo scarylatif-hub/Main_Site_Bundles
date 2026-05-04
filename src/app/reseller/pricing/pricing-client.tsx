@@ -22,8 +22,8 @@ interface PricingClientProps {
 }
 
 interface ResellerPrice {
-  package_id: string;
-  price: number;
+  package_id: number;
+  selling_price: number;
 }
 
 export default function PricingClient({
@@ -55,7 +55,7 @@ export default function PricingClient({
           const pricesData = await pricesResponse.json();
           const priceMap: Record<string, number> = {};
           (pricesData || []).forEach((price: ResellerPrice) => {
-            priceMap[price.package_id] = price.price;
+            priceMap[String(price.package_id)] = price.selling_price;
           });
           setCustomPrices(priceMap);
         }
@@ -128,7 +128,7 @@ export default function PricingClient({
         return {
           reseller_id: userId,
           package_id: parseInt(packageId), // Convert to integer as expected by DB
-          network_id: pkg.network.id, // Include network_id from package data
+          network_id: pkg.network?.id || 1, // Include network_id from package data with fallback
           selling_price: sellingPrice
         };
       }).filter(Boolean); // Filter out null entries

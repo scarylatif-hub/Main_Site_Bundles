@@ -10,6 +10,7 @@ import {
 import { AdminOrdersTable } from "./admin-orders-table";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0; // Disable caching
 
 export default async function MyAdminOrdersPage() {
   const admin = createAdminClient();

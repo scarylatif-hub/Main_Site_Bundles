@@ -57,14 +57,15 @@ export const validatePhoneNumber = (phone: string): boolean => {
  * 
  * DataKazina IDs (from API):
  * - MTN: 3
- * - Airtel Tigo: 2
- * - Telecel: 4 (inferred)
+ * - Telecel: 4
+ * - AirtelTigo (AT - iSHare): 1
+ * - AirtelTigo (AT - BigTime): 2
  */
 export const mapToDataKazinaNetworkId = (frontendNetworkId: number): number => {
   const mapping: Record<number, number> = {
     1: 3, // Frontend MTN → DataKazina MTN
     2: 4, // Frontend Telecel → DataKazina Telecel
-    3: 2, // Frontend AirtelTigo → DataKazina Airtel Tigo
+    3: 1, // Frontend AirtelTigo → DataKazina AT-iSHare (use iSHare as default)
   };
   return mapping[frontendNetworkId] ?? frontendNetworkId;
 };

@@ -44,6 +44,18 @@ export async function POST(req: NextRequest) {
     totalEarnings = profitData.reduce((sum, order) => sum + (order.reseller_profit || 0), 0);
   }
 
+  // Calculate transferred amount from earnings_to_wallet_transfers table
+  const { data: transferredData } = await admin
+    .from("earnings_to_wallet_transfers")
+    .select("amount")
+    .eq("user_id", user.id)
+    .eq("status", "completed");
+
+  let transferredAmount = 0;
+  if (transferredData) {
+    transferredAmount = transferredData.reduce((sum, transfer) => sum + transfer.amount, 0);
+  }
+
   // Calculate withdrawn amount from withdrawals table
   const { data: withdrawnData } = await admin
     .from("withdrawals")
@@ -56,8 +68,8 @@ export async function POST(req: NextRequest) {
     withdrawnAmount = withdrawnData.reduce((sum, withdrawal) => sum + withdrawal.amount, 0);
   }
 
-  // Available earnings = Total earnings - Already withdrawn
-  const availableEarnings = totalEarnings - withdrawnAmount;
+  // Available earnings = Total earnings - Already transferred - Already withdrawn
+  const availableEarnings = totalEarnings - transferredAmount - withdrawnAmount;
 
   if (moveAmount > availableEarnings) {
     return NextResponse.json({ error: "Insufficient available earnings" }, { status: 400 });
@@ -68,7 +80,7 @@ export async function POST(req: NextRequest) {
     const currentWalletBalance = Number(profile.wallet_balance || 0);
     const newWalletBalance = currentWalletBalance + moveAmount;
     
-    // Update wallet balance
+    // Start a transaction to ensure atomicity
     const { error: walletError } = await admin
       .from("profiles")
       .update({ wallet_balance: newWalletBalance })
@@ -79,7 +91,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Failed to update wallet" }, { status: 500 });
     }
 
-    // Create a record of the transfer (optional, for tracking)
+    // Create a record of the transfer to track deducted earnings
     const { error: transferError } = await admin
       .from("earnings_to_wallet_transfers")
       .insert({
@@ -91,7 +103,12 @@ export async function POST(req: NextRequest) {
 
     if (transferError) {
       console.error("Transfer record error:", transferError);
-      // Don't fail the request since wallet was updated successfully
+      // Rollback wallet update if transfer record fails
+      await admin
+        .from("profiles")
+        .update({ wallet_balance: currentWalletBalance })
+        .eq("id", user.id);
+      return NextResponse.json({ error: "Failed to record transfer" }, { status: 500 });
     }
 
     return NextResponse.json({

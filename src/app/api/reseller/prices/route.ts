@@ -23,6 +23,7 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Failed to fetch prices" }, { status: 500 });
     }
 
+    console.log("Fetched prices for user:", user.id, "data:", data);
     return NextResponse.json(data || []);
   } catch (error) {
     console.error("Fetch prices error:", error);
@@ -42,6 +43,8 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const prices = Array.isArray(body) ? body : [body];
 
+    console.log("Saving prices for user:", user.id, "prices:", prices);
+
     const admin = createAdminClient();
 
     const { error } = await admin
@@ -55,6 +58,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Failed to save prices" }, { status: 500 });
     }
 
+    console.log("Prices saved successfully for user:", user.id);
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Save prices error:", error);
