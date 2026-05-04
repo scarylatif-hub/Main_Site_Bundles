@@ -88,7 +88,6 @@ export async function POST(req: NextRequest) {
 
   // Add additional fields if available
   if (body.amount) transactionPatch.amount = Number(body.amount);
-  if (body.occurred_at) transactionPatch.provider_updated_at = String(body.occurred_at);
 
   const { data: transactionData, error: transactionError } = await admin
     .from("transactions")
@@ -108,7 +107,6 @@ export async function POST(req: NextRequest) {
     updated_at: new Date().toISOString(),
   };
 
-  if (body.occurred_at) overridePatch.provider_updated_at = String(body.occurred_at);
   if (body.metadata) overridePatch.metadata = body.metadata;
 
   const { data: overrideData, error: overrideError } = await admin
