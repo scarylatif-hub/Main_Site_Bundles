@@ -8,7 +8,7 @@ export function getRetailPriceMultiplier(): number {
     const n = parseFloat(raw);
     if (!Number.isNaN(n) && n > 0) return n;
   }
-  return 1.14; // 14% markup for main website
+  return 1.13; // 14% markup for main website
 }
 
 export function applyRetailPrice(wholesaleGhs: number): number {

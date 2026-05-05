@@ -3,12 +3,16 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // ntfy configuration
-const NTFY_TOPIC = process.env.NTFY_TOPIC || "bundle-ghana-withdrawals";
+const NTFY_TOPIC = process.env.NTFY_TOPIC || "bundle-ghana";
 const NTFY_URL = `https://ntfy.sh/${NTFY_TOPIC}`;
 
 async function sendNtfyNotification(title: string, message: string) {
   try {
-    await fetch(NTFY_URL, {
+    console.log("[withdrawals] Sending ntfy notification to:", NTFY_URL);
+    console.log("[withdrawals] Title:", title);
+    console.log("[withdrawals] Message length:", message.length);
+    
+    const response = await fetch(NTFY_URL, {
       method: "POST",
       headers: {
         "Title": title,
@@ -16,7 +20,12 @@ async function sendNtfyNotification(title: string, message: string) {
       },
       body: message,
     });
-    // Removed notification logging to prevent exposing sensitive data in console
+    
+    if (!response.ok) {
+      console.error("[withdrawals] Ntfy response error:", response.status, response.statusText);
+    } else {
+      console.log("[withdrawals] Ntfy notification sent successfully");
+    }
   } catch (error) {
     console.error("[withdrawals] Failed to send ntfy notification:", error);
   }

@@ -17,6 +17,25 @@ import { normalizePhoneNumber } from "@/lib/networks";
 import { displayNetworkIdToDatakazina } from "@/lib/network-id-map";
 import { notifyAdminBundlePurchase }    from "@/lib/server/notifications";
 
+// ntfy configuration
+const NTFY_TOPIC = process.env.NTFY_TOPIC || "bundle-ghana";
+const NTFY_URL = `https://ntfy.sh/${NTFY_TOPIC}`;
+
+async function sendNtfyNotification(title: string, message: string) {
+  try {
+    await fetch(NTFY_URL, {
+      method: "POST",
+      headers: {
+        "Title": title,
+        "Priority": "high",
+      },
+      body: message,
+    });
+  } catch (error) {
+    console.error("[buy-bundle] Failed to send ntfy notification:", error);
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function abortPendingPurchase(
@@ -279,6 +298,26 @@ export async function POST(req: NextRequest) {
       networkId:       Number(networkId),
       recipientMsisdn: recipient_msisdn,
     });
+
+    // Send ntfy notification for successful main site purchase
+    const ntfyMessage = `
+🛒 MAIN SITE PURCHASE COMPLETED
+========================================
+
+📋 Purchase Details:
+User ID: ${user.id}
+Recipient Phone: ${recipient_msisdn}
+Package: ${String(dataAmount)}
+Amount Paid: GHS ${p.toFixed(2)}
+Transaction Code: ${providerCode}
+
+⏰ Completed: ${new Date().toISOString()}
+  `.trim();
+
+    await sendNtfyNotification(
+      `🛒 Purchase: GHS ${p.toFixed(2)} - User ${user.id}`,
+      ntfyMessage
+    );
 
     return NextResponse.json({
       success:          true,

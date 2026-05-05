@@ -58,18 +58,31 @@ export default async function StorePage({
 
   // Apply profit margin to calculate selling prices
   const profitMargin = Number(storeOwner.profit_margin || 0.05);
-  const adminMarkup = 0.14; // 14% admin markup for main website
 
-  const packages = pkgResult.data
+  let packages = pkgResult.data
     ? pkgResult.data.map((pkg: any) => {
-        const consolePrice = Number(pkg.console_price || pkg.price || 0);
-        const resellerCost = consolePrice * (1 + adminMarkup);
-        
-        // Use custom price if available, otherwise calculate with profit margin
-        const sellingPrice = customPriceMap.get(Number(pkg.id)) || (resellerCost * (1 + profitMargin));
-
-        // Convert DataKazina network ID to display network ID
+        // Use retail price from retail-prices.ts and apply tiered admin profit margin
         const displayNetworkId = datakazinaNetworkIdToDisplay(Number(pkg.network_id));
+        const sharedBundle = Number(pkg.volume || pkg.shared_bundle);
+        
+        // Import retail prices function
+        const retailPrices = require("@/lib/retail-prices");
+        const retailPrice = retailPrices.getRetailPriceGhs(displayNetworkId, sharedBundle) || Number(pkg.price || 0);
+        
+        // Apply tiered profit margin: 11.4% for 1-9GB, 10% for 10GB+
+        let adminProfitMargin;
+        if (sharedBundle >= 1 && sharedBundle <= 9) {
+          adminProfitMargin = 0.114; // 11.4% for 1-9GB
+        } else if (sharedBundle >= 10) {
+          adminProfitMargin = 0.10; // 10% for 10GB+
+        } else {
+          adminProfitMargin = 0.114; // Default to 11.4% for safety
+        }
+        
+        const adminPrice = retailPrice * (1 + adminProfitMargin);
+
+        // Use custom price if available, otherwise calculate with store owner profit margin on top of admin price
+        const sellingPrice = customPriceMap.get(Number(pkg.id)) || (adminPrice * (1 + profitMargin));
 
         // Use volumeGB field for display (e.g., "2GB", "3GB")
         const displayName =
@@ -84,12 +97,20 @@ export default async function StorePage({
           network_id: displayNetworkId,
           name: displayName,
           data_amount: displayName,
-          cost_price: resellerCost,
+          cost_price: adminPrice,
           selling_price: sellingPrice,
           validity: pkg.validity || "30 days",
+          sharedBundle: sharedBundle,
         };
       })
     : [];
+
+  // Sort packages by size (smaller first, larger later)
+  packages.sort((a: any, b: any) => {
+    const aSize = a.sharedBundle || 0;
+    const bSize = b.sharedBundle || 0;
+    return aSize - bSize;
+  });
 
   return <StoreClient storeOwner={storeOwner} packages={packages} />;
 }

@@ -4,7 +4,7 @@ import { datakazinaAPI } from '@/lib/datakazina';
 import { NETWORKS } from '@/lib/networks';
 import type { NetworkName } from '@/lib/definitions';
 import { datakazinaNetworkIdToDisplay } from '@/lib/network-id-map';
-import { getRetailPriceGhs } from '@/lib/retail-prices';
+import { getRetailPriceGhs, ADMIN_PROFIT_MARGIN } from '@/lib/retail-prices';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,8 +28,20 @@ function mapDataKazinaPackages(raw: unknown[]): unknown[] {
     const dataAmount = pkg.volumeGB || pkg.volume || pkg.data_amount || `${sharedBundle}GB`;
     const validity = pkg.validity || '30 days';
 
-    // Use retail price from retail-prices.ts
-    const retailPrice = getRetailPriceGhs(displayNetId, sharedBundle) || 0;
+    // Use DataKazina API price directly and apply tiered admin profit margin
+    const apiPrice = Number(pkg.price || pkg.console_price || 0);
+    
+    // Apply tiered profit margin: 11.4% for 1-9GB, 10% for 10GB+
+    let profitMargin;
+    if (sharedBundle >= 1 && sharedBundle <= 9) {
+      profitMargin = 0.114; // 11.4% for 1-9GB
+    } else if (sharedBundle >= 10) {
+      profitMargin = 0.10; // 10% for 10GB+
+    } else {
+      profitMargin = 0.114; // Default to 11.4% for safety
+    }
+    
+    const priceWithAdminProfit = apiPrice * (1 + profitMargin);
 
     return {
       id: String(pkg.id), // Keep DataKazina package ID for purchase
@@ -37,7 +49,7 @@ function mapDataKazinaPackages(raw: unknown[]): unknown[] {
       dataAmount,
       validity,
       sharedBundle: Number.isFinite(sharedBundle) ? sharedBundle : 0,
-      price: retailPrice,
+      price: priceWithAdminProfit,
     };
   });
 }
@@ -63,8 +75,16 @@ export async function GET() {
     }
 
     const mappedPackages = mapDataKazinaPackages(pkgResult.data);
+
+    // Sort packages by sharedBundle (smaller first, larger later)
+    mappedPackages.sort((a: any, b: any) => {
+      const aSize = a.sharedBundle || 0;
+      const bSize = b.sharedBundle || 0;
+      return aSize - bSize; // Ascending order - smaller first
+    });
+
     // Removed package count logging to prevent exposing API details in console
-    
+
     return NextResponse.json(mappedPackages);
   } catch (error) {
     console.error('Error fetching packages from DataKazina:', error);

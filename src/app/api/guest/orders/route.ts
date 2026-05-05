@@ -22,6 +22,25 @@ import { retryWithBackoff }           from "@/lib/server/retry";
 import { normalizePhoneNumber }       from "@/lib/networks";
 import { displayNetworkIdToDatakazina } from "@/lib/network-id-map";
 
+// ntfy configuration
+const NTFY_TOPIC = process.env.NTFY_TOPIC || "bundle-ghana";
+const NTFY_URL = `https://ntfy.sh/${NTFY_TOPIC}`;
+
+async function sendNtfyNotification(title: string, message: string) {
+  try {
+    await fetch(NTFY_URL, {
+      method: "POST",
+      headers: {
+        "Title": title,
+        "Priority": "high",
+      },
+      body: message,
+    });
+  } catch (error) {
+    console.error("[guest/orders] Failed to send ntfy notification:", error);
+  }
+}
+
 // ── Paystack verification ─────────────────────────────────────────────────────
 
 async function verifyPaystackPayment(reference: string): Promise<boolean> {
@@ -244,46 +263,37 @@ export async function POST(req: NextRequest) {
 
   // Removed profit logging to prevent exposing financial data in console
 
-  // Credit reseller profit to wallet (non-blocking — failure here must not affect the response)
-  if (resellerProfit > 0) {
-    creditResellerWallet(admin, storeOwner, resellerProfit).catch((e) =>
-      console.error("[guest/orders] Wallet credit failed:", e)
-    );
-  }
+  // Store profit is tracked in orders table via reseller_profit field
+  // It will be available as earnings in the reseller dashboard
+  // Do NOT credit wallet balance - earnings should be moved to wallet manually
+
+  // Send ntfy notification for successful store order
+  const ntfyMessage = `
+🛒 STORE ORDER COMPLETED
+========================================
+
+📋 Order Details:
+Store ID: ${store_id}
+Customer Phone: ${recipient_msisdn}
+Package: ${pkg.volume || pkg.shared_bundle}GB
+Amount Paid: GHS ${Number(amount).toFixed(2)}
+Transaction Code: ${providerCode}
+
+👤 Store Owner:
+User ID: ${storeOwner.id}
+Store Profit: GHS ${resellerProfit > 0 ? resellerProfit.toFixed(2) : '0.00'}
+
+⏰ Completed: ${new Date().toISOString()}
+  `.trim();
+
+  await sendNtfyNotification(
+    `🛒 Store Order: GHS ${Number(amount).toFixed(2)} - Store ${store_id}`,
+    ntfyMessage
+  );
 
   return NextResponse.json({
     success:          true,
     transaction_code: providerCode,
     reference:        providerCode,
   });
-}
-
-// ── Reseller wallet credit ────────────────────────────────────────────────────
-
-async function creditResellerWallet(
-  admin:      ReturnType<typeof createAdminClient>,
-  storeOwner: { id: string; wallet_balance: number | null },
-  profit:     number
-): Promise<void> {
-  if (profit <= 0) {
-    // Removed profit logging to prevent exposing financial data in console
-    return;
-  }
-
-  // Use increment via RPC if available — otherwise read-then-write is acceptable
-  // here because the wallet credit is non-critical (can be reconciled manually).
-  const currentBalance = Number(storeOwner.wallet_balance ?? 0);
-  const newBalance = currentBalance + profit;
-
-  const { error } = await admin
-    .from("profiles")
-    .update({ wallet_balance: newBalance })
-    .eq("id", storeOwner.id);
-
-  if (error) {
-    console.error("[guest/orders] Wallet credit DB error:", error);
-    throw error;
-  }
-
-  // Removed success logging to prevent exposing transaction details
 }

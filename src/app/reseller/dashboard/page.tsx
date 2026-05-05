@@ -204,7 +204,7 @@ export default function ResellerDashboard() {
               onClick={() => router.push("/reseller/pricing")}
             >
               <Package className="h-4 w-4" />
-              <span className="text-sm">Manage Packages</span>
+              <span className="text-sm">Edit Prices</span>
             </Button>
             <Button
               variant="outline"
@@ -217,7 +217,7 @@ export default function ResellerDashboard() {
               }}
             >
               <Eye className="h-4 w-4" />
-              <span className="text-sm">View Store</span>
+              <span className="text-sm">Open Store</span>
             </Button>
           </div>
         </CardContent>

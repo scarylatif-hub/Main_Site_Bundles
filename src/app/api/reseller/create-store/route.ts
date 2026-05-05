@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // ntfy configuration
-const NTFY_TOPIC = process.env.NTFY_TOPIC || "bundle-ghana-withdrawals";
+const NTFY_TOPIC = process.env.NTFY_TOPIC || "bundle-ghana";
 const NTFY_URL = `https://ntfy.sh/${NTFY_TOPIC}`;
 
 async function sendNtfyNotification(title: string, message: string) {
