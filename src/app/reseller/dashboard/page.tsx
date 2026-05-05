@@ -41,6 +41,13 @@ type StoreStats = {
 export default function ResellerDashboard() {
   const { user, userProfile, loading, logout, refreshUser } = useAuth();
   const router = useRouter();
+
+  // Early return for non-resellers - BEFORE any other hooks
+  if (!loading && userProfile && !userProfile?.is_reseller) {
+    router.push("/profile");
+    return null;
+  }
+
   const [stats, setStats] = useState<StoreStats>({
     totalEarnings: 0,
     walletBalance: 0,
@@ -141,14 +148,6 @@ export default function ResellerDashboard() {
         <div>{loadingTimeout ? "Taking longer than expected..." : "Loading..."}</div>
       </div>
     );
-  }
-
-  if (!userProfile?.is_reseller) {
-    // Use useEffect to navigate during render, not during component render
-    useEffect(() => {
-      router.push("/profile");
-    }, []);
-    return null;
   }
 
   const storeUrl = userProfile?.reseller_slug ? `https://${process.env.NEXT_PUBLIC_STORE_DOMAIN || "bundles-store.vercel.app"}/store/${userProfile.reseller_slug}` : "";

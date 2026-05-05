@@ -28,8 +28,8 @@ export async function POST(req: NextRequest) {
 
   // Validate amount
   const moveAmount = Number(amount);
-  if (isNaN(moveAmount) || moveAmount <= 0) {
-    return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
+  if (isNaN(moveAmount) || moveAmount < 0.01) {
+    return NextResponse.json({ error: "Minimum transfer amount is 0.01 GHS" }, { status: 400 });
   }
 
   // Calculate total earnings from completed orders

@@ -25,8 +25,8 @@ export function WithdrawalDialog({ walletBalance }: { walletBalance: number }) {
   const [momoName, setMomoName] = useState("");
 
   const handleWithdraw = async () => {
-    if (!amount || Number(amount) <= 0) {
-      toast({ title: "Invalid amount", description: "Please enter a valid amount", variant: "destructive" });
+    if (!amount || Number(amount) < 0.01) {
+      toast({ title: "Invalid amount", description: "Minimum withdrawal is 0.01 GHS", variant: "destructive" });
       return;
     }
 

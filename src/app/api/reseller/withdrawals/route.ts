@@ -48,8 +48,8 @@ export async function POST(req: NextRequest) {
 
   // Validate amount
   const withdrawalAmount = Number(amount);
-  if (isNaN(withdrawalAmount) || withdrawalAmount <= 0) {
-    return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
+  if (isNaN(withdrawalAmount) || withdrawalAmount < 0.01) {
+    return NextResponse.json({ error: "Minimum withdrawal amount is 0.01 GHS" }, { status: 400 });
   }
 
   // Calculate total earnings from completed store orders
