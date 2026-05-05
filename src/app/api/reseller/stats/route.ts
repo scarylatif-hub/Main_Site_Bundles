@@ -36,6 +36,35 @@ export async function GET(req: NextRequest) {
     totalEarnings = profitData.reduce((sum, order) => sum + (order.reseller_profit || 0), 0);
   }
 
+  // Calculate transferred amount from earnings_to_wallet_transfers table
+  const { data: transferredData } = await admin
+    .from("earnings_to_wallet_transfers")
+    .select("amount")
+    .eq("user_id", user.id)
+    .eq("status", "completed")
+    .eq("source", "earnings");
+
+  let transferredAmount = 0;
+  if (transferredData) {
+    transferredAmount = transferredData.reduce((sum, transfer) => sum + transfer.amount, 0);
+  }
+
+  // Calculate withdrawn amount from withdrawals
+  const { data: withdrawnData } = await admin
+    .from("earnings_to_wallet_transfers")
+    .select("amount")
+    .eq("user_id", user.id)
+    .eq("status", "pending")
+    .eq("method", "momo");
+
+  let withdrawnAmount = 0;
+  if (withdrawnData) {
+    withdrawnAmount = withdrawnData.reduce((sum, withdrawal) => sum + withdrawal.amount, 0);
+  }
+
+  // Available earnings = Total earnings - Already transferred - Already withdrawn
+  const availableEarnings = totalEarnings - transferredAmount - withdrawnAmount;
+
   // Also include wallet balance (which should match total earnings, but we show both for transparency)
   const walletBalance = Number(profile.wallet_balance || 0);
 
@@ -50,7 +79,8 @@ export async function GET(req: NextRequest) {
     .eq("store_id", user.id);
 
   return NextResponse.json({
-    totalEarnings,
+    totalEarnings: availableEarnings, // Show available earnings, not lifetime earnings
+    lifetimeEarnings: totalEarnings, // Lifetime earnings for reference
     walletBalance,
     totalPackages,
     activePackages,

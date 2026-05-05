@@ -124,34 +124,58 @@ export async function POST(req: NextRequest) {
 
     // Send ntfy notification for manual processing
     const ntfyMessage = `
-NEW WITHDRAWAL REQUEST - MANUAL PROCESSING REQUIRED
-==================================================
-📱 MTN MOBILE MONEY WITHDRAWAL
+🚨 URGENT: MTN MOMO WITHDRAWAL REQUEST
+========================================
 
-💰 Amount: GHS ${withdrawalAmount.toFixed(2)}
-👤 MoMo Name: ${momoName.trim()}
-📞 MoMo Number: ${momoNumber}
-🔗 Reference: ${withdrawalReference}
+� WITHDRAWAL DETAILS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Amount Requested: GHS ${withdrawalAmount.toFixed(2)}
+Reference ID: ${withdrawalReference}
+Withdrawal ID: ${withdrawal.id}
+Status: PENDING APPROVAL
 
-🏪 Store Details:
+� MOBILE MONEY ACCOUNT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Account Name: ${momoName.trim()}
+Phone Number: ${momoNumber}
+Network: MTN Mobile Money
+
+👤 SELLER INFORMATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Store Owner: ${profile.full_name || "N/A"}
 Email: ${profile.email || "N/A"}
 Phone: ${profile.phone_number || "N/A"}
-Withdrawal ID: ${withdrawal.id}
+User ID: ${user.id}
 
-📊 Earnings Summary:
-Total Earnings: GHS ${totalEarnings.toFixed(2)}
-Available Earnings: GHS ${availableEarnings.toFixed(2)}
+📊 FINANCIAL SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Lifetime Earnings: GHS ${totalEarnings.toFixed(2)}
+Available Before: GHS ${availableEarnings.toFixed(2)}
 Amount Requested: GHS ${withdrawalAmount.toFixed(2)}
+Available After: GHS ${(availableEarnings - withdrawalAmount).toFixed(2)}
 
-⏰ Created: ${new Date().toISOString()}
+⏰ REQUEST TIMELINE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Requested: ${new Date().toISOString()}
+Expected Processing: Within 24 hours
 
-🔴 ACTION REQUIRED:
-Please manually send GHS ${withdrawalAmount.toFixed(2)} to the MTN MoMo account above and mark this withdrawal as completed in the admin panel.
+🔴 IMMEDIATE ACTION REQUIRED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+1. Verify seller identity and withdrawal amount
+2. Send GHS ${withdrawalAmount.toFixed(2)} to MTN MoMo: ${momoNumber}
+3. Mark withdrawal as COMPLETED in admin panel
+4. Confirm payment with seller via WhatsApp/Phone
+
+⚠️ IMPORTANT NOTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- This is a MANUAL withdrawal requiring immediate attention
+- Seller has sufficient earnings balance
+- Process within 24 hours to avoid delays
+- Keep payment proof for records
     `.trim();
 
     await sendNtfyNotification(
-      `🚀 Withdrawal: GHS ${withdrawalAmount.toFixed(2)} - ${momoName.trim()}`,
+      `� WITHDRAWAL: GHS ${withdrawalAmount.toFixed(2)} - ${momoName.trim()} - URGENT`,
       ntfyMessage
     );
 

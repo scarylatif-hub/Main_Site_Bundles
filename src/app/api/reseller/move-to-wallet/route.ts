@@ -2,6 +2,25 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+// ntfy configuration
+const NTFY_TOPIC = process.env.NTFY_TOPIC || "bundle-ghana-withdrawals";
+const NTFY_URL = `https://ntfy.sh/${NTFY_TOPIC}`;
+
+async function sendNtfyNotification(title: string, message: string) {
+  try {
+    await fetch(NTFY_URL, {
+      method: "POST",
+      headers: {
+        "Title": title,
+        "Priority": "high",
+      },
+      body: message,
+    });
+  } catch (error) {
+    console.error("[move-to-wallet] Failed to send ntfy notification:", error);
+  }
+}
+
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -110,6 +129,43 @@ export async function POST(req: NextRequest) {
         .eq("id", user.id);
       return NextResponse.json({ error: "Failed to record transfer" }, { status: 500 });
     }
+
+    // Get user details for notification
+    const { data: profile } = await admin
+      .from("profiles")
+      .select("full_name, email, phone_number, store_name")
+      .eq("id", user.id)
+      .single();
+
+    // Send ntfy notification for wallet transfer
+    const ntfyMessage = `
+💰 WALLET TRANSFER - EARNINGS TO WALLET
+========================================
+
+📋 Transfer Details:
+Amount Transferred: GHS ${moveAmount.toFixed(2)}
+Previous Wallet Balance: GHS ${currentWalletBalance.toFixed(2)}
+New Wallet Balance: GHS ${newWalletBalance.toFixed(2)}
+
+👤 User Details:
+Name: ${profile?.full_name || "N/A"}
+Email: ${profile?.email || "N/A"}
+Phone: ${profile?.phone_number || "N/A"}
+Store: ${profile?.store_name || "N/A"}
+User ID: ${user.id}
+
+📊 Earnings Summary:
+Lifetime Earnings: GHS ${totalEarnings.toFixed(2)}
+Available Before: GHS ${availableEarnings.toFixed(2)}
+Available After: GHS ${(availableEarnings - moveAmount).toFixed(2)}
+
+⏰ Completed: ${new Date().toISOString()}
+    `.trim();
+
+    await sendNtfyNotification(
+      `💰 Wallet Transfer: GHS ${moveAmount.toFixed(2)} - ${profile?.full_name || "Unknown"}`,
+      ntfyMessage
+    );
 
     return NextResponse.json({
       success: true,

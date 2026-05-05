@@ -2,6 +2,25 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+// ntfy configuration
+const NTFY_TOPIC = process.env.NTFY_TOPIC || "bundle-ghana-withdrawals";
+const NTFY_URL = `https://ntfy.sh/${NTFY_TOPIC}`;
+
+async function sendNtfyNotification(title: string, message: string) {
+  try {
+    await fetch(NTFY_URL, {
+      method: "POST",
+      headers: {
+        "Title": title,
+        "Priority": "high",
+      },
+      body: message,
+    });
+  } catch (error) {
+    console.error("[create-store] Failed to send ntfy notification:", error);
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
@@ -55,6 +74,43 @@ export async function POST(req: NextRequest) {
       console.error("Store creation error:", updateError);
       return NextResponse.json({ error: "Failed to create store" }, { status: 500 });
     }
+
+    // Get user details for notification
+    const { data: profile } = await admin
+      .from("profiles")
+      .select("full_name, email, phone_number")
+      .eq("id", user.id)
+      .single();
+
+    // Send ntfy notification for new store creation
+    const ntfyMessage = `
+🏪 NEW STORE CREATION REQUEST - APPROVAL REQUIRED
+===================================================
+
+📋 Store Details:
+Store Name: ${storeName}
+Store Slug: ${storeSlug}
+Store URL: https://${process.env.NEXT_PUBLIC_STORE_DOMAIN || "bundles-store.vercel.app"}/store/${storeSlug}
+
+👤 Reseller Details:
+Name: ${profile?.full_name || "N/A"}
+Email: ${profile?.email || "N/A"}
+Phone: ${profile?.phone_number || "N/A"}
+User ID: ${user.id}
+
+📊 Configuration:
+Profit Margin: 5%
+Status: Pending Approval
+Created: ${new Date().toISOString()}
+
+🔴 ACTION REQUIRED:
+Please review and approve this store in the admin panel.
+    `.trim();
+
+    await sendNtfyNotification(
+      `🏪 New Store: ${storeName} - ${profile?.full_name || "Unknown"}`,
+      ntfyMessage
+    );
 
     return NextResponse.json({
       success: true,
