@@ -112,13 +112,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (mounted) setLoading(false);
     });
 
-    // Listen for auth state changes
+    // Listen for auth state changes with better session handling
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, s) => {
         if (!mounted) return;
+        console.log("Auth state change:", event, s?.user?.email);
         await applySession(s);
         if (event === "SIGNED_OUT") {
           setUserProfile(null);
+          // Clear any local storage data if needed
+          localStorage.removeItem('supabase.auth.token');
+        } else if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+          // Session refreshed or new sign in - ensure profile is loaded
+          if (s?.user) {
+            const profile = await fetchProfile(s.user.id);
+            if (profile) setUserProfile(profile);
+          }
         }
         setLoading(false);
       }

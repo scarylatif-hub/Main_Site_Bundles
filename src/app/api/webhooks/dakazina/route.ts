@@ -88,6 +88,9 @@ export async function POST(req: NextRequest) {
 
   // Add additional fields if available
   if (body.amount) transactionPatch.amount = Number(body.amount);
+  if (body.network_id) transactionPatch.network_id = Number(body.network_id);
+  if (body.recipient_msisdn) transactionPatch.recipient_msisdn = String(body.recipient_msisdn);
+  if (body.bundle_amount) transactionPatch.bundle_amount = String(body.bundle_amount);
 
   const { data: transactionData, error: transactionError } = await admin
     .from("transactions")

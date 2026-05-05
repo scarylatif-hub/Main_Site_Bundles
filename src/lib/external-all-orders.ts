@@ -303,8 +303,8 @@ export function storeOrderToAdminRow(
     user_id: order.store_id,
     created_at: order.created_at,
     recipient_msisdn: order.customer_phone || order.phone_number,
-    // Store orders use DataKazina network IDs, convert to display format
-    network_id: datakazinaNetworkIdToDisplay(order.network_id),
+    // Store orders already have display network IDs, no conversion needed
+    network_id: order.network_id,
     network_label: null,
     bundle_amount: null, // Would need to fetch package details
     status: order.status,

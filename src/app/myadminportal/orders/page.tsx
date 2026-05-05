@@ -31,6 +31,7 @@ export default async function MyAdminOrdersPage() {
   const phoneMap = buildPhoneProfileMap(profiles || []);
 
   // Fetch external API orders (main site)
+  console.log("Fetching external orders from DataKazina...");
   const rawExternal = await fetchExternalAllOrdersRaw();
   const externalRows: AdminOrderRow[] = [];
   for (const raw of rawExternal) {
@@ -39,8 +40,10 @@ export default async function MyAdminOrdersPage() {
   }
 
   await enrichAdminOrderRowsWithLedgerBuyers(externalRows, admin);
+  console.log(`Processed ${externalRows.length} external orders`);
 
   // Fetch store orders from local database
+  console.log("Fetching store orders from database...");
   const { data: storeOrders, error: storeOrdersError } = await admin
     .from("orders")
     .select("*")
@@ -66,9 +69,11 @@ export default async function MyAdminOrdersPage() {
     const row = storeOrderToAdminRow(order, storeName);
     storeRows.push(row);
   }
+  console.log(`Processed ${storeRows.length} store orders`);
 
   // Merge both order sources
   const allRows = [...externalRows, ...storeRows];
+  console.log(`Total orders: ${allRows.length} (${externalRows.length} external + ${storeRows.length} store)`);
 
   const { data: ovRows } = await admin
     .from("provider_order_overrides")

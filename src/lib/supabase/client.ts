@@ -7,5 +7,13 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error("Missing Supabase environment variables");
 }
 
-/** Browser client — persists session in cookies (works with middleware + server routes). */
-export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey);
+/** Browser client — persists session in cookies with extended duration. */
+export const supabase = createBrowserClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+    flowType: 'pkce',
+    debug: process.env.NODE_ENV === 'development'
+  }
+});
