@@ -38,6 +38,20 @@ export async function GET(
       .eq("customer_phone", phone)
       .order("created_at", { ascending: false });
 
+    // Fetch admin overrides for these orders (3-tier resolution - tier 1)
+    const orderReferences = (orders || [])
+      .map((o: any) => o.paystack_transaction_id || o.id)
+      .filter(Boolean);
+
+    const { data: overrides } = await admin
+      .from("provider_order_overrides")
+      .select("transaction_id,status")
+      .in("transaction_id", orderReferences);
+
+    const overrideMap = new Map(
+      (overrides || []).map((o: any) => [o.transaction_id, o.status])
+    );
+
     // Fetch packages to get names
     const pkgResult = await datakazinaAPI.fetchDataPackages();
     if (!pkgResult.ok || !pkgResult.data) {
@@ -53,6 +67,8 @@ export async function GET(
       package_name: packageMap.get(order.package_id) || `Package ${order.package_id}`,
       // Convert DataKazina network IDs to display format
       network_id: order.network_id ? datakazinaNetworkIdToDisplay(order.network_id) : null,
+      // Apply 3-tier resolution: override (tier 1) > db status (tier 3)
+      status: overrideMap.get(order.paystack_transaction_id || order.id) || order.status,
     })) || [];
 
     return NextResponse.json({

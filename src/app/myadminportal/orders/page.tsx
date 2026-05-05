@@ -7,6 +7,7 @@ import {
   storeOrderToAdminRow,
   type AdminOrderRow,
 } from "@/lib/external-all-orders";
+import { datakazinaAPI } from "@/lib/datakazina";
 import { AdminOrdersTable } from "./admin-orders-table";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +55,17 @@ export default async function MyAdminOrdersPage() {
     console.error("myadminportal orders store orders:", storeOrdersError);
   }
 
+  // Fetch package data for bundle amounts
+  console.log("Fetching packages for bundle amounts...");
+  const pkgResult = await datakazinaAPI.fetchDataPackages();
+  const packageMap = new Map<number, string>();
+  if (pkgResult.ok && pkgResult.data) {
+    for (const pkg of pkgResult.data) {
+      const label = pkg.volumeGB || `${pkg.volume}GB` || `Package ${pkg.id}`;
+      packageMap.set(pkg.id, label);
+    }
+  }
+
   // Build store name map
   const storeNameMap = new Map<string, string>();
   for (const p of profiles || []) {
@@ -66,7 +78,8 @@ export default async function MyAdminOrdersPage() {
   const storeRows: AdminOrderRow[] = [];
   for (const order of storeOrders || []) {
     const storeName = storeNameMap.get(order.store_id) || "Unknown Store";
-    const row = storeOrderToAdminRow(order, storeName);
+    const bundleAmount = packageMap.get(order.package_id) || null;
+    const row = storeOrderToAdminRow(order, storeName, bundleAmount);
     storeRows.push(row);
   }
   console.log(`Processed ${storeRows.length} store orders`);

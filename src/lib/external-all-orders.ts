@@ -201,8 +201,16 @@ export function normalizeExternalOrder(
       ? sharedGb
       : parseGbFromBundleLabel(bundle_amount);
 
-  const statusVal = pick(o, ["status", "order_status", "state"]);
-  const status = statusVal != null ? String(statusVal) : "unknown";
+  const statusVal = pick(o, ["status", "order_status", "state", "delivery_status", "deliveryStatus"]);
+  const status = statusVal != null ? String(statusVal).trim() : "unknown";
+  
+  // Log status extraction for debugging
+  if (!statusVal || String(statusVal).trim() === "") {
+    console.warn("external-order status empty", {
+      id,
+      availableKeys: Object.keys(o),
+    });
+  }
 
   let price =
     parseNum(pick(o, ["price", "amount", "total", "cost", "charge", "customer_price"])) ?? 0;
@@ -291,7 +299,8 @@ export function storeOrderToAdminRow(
     created_at: string;
     paystack_transaction_id: string | null;
   },
-  storeName: string
+  storeName: string,
+  bundleAmount?: string | null
 ): AdminOrderRow {
   // For store orders, customer_email contains the user's name (from "Your Name (Optional)" field)
   const userName = order.customer_email || "Guest";
@@ -306,7 +315,7 @@ export function storeOrderToAdminRow(
     // Store orders already have display network IDs, no conversion needed
     network_id: order.network_id,
     network_label: null,
-    bundle_amount: null, // Would need to fetch package details
+    bundle_amount: bundleAmount || null, // Volume from package lookup
     status: order.status,
     amount: Math.abs(order.amount),
     customerEmail: userName, // User's name (not email for store orders)

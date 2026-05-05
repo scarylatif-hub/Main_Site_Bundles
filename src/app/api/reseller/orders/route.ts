@@ -9,8 +9,8 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/reseller/orders?type=personal|store
  * Returns orders for the reseller:
- * - type=personal: their own purchases (from transactions table)
- * - type=store: all orders from their store (from orders table)
+ * - type=personal: their own purchases (from transactions table, with 3-tier status resolution)
+ * - type=store: all orders from their store (from orders table, with admin override check)
  */
 export async function GET(req: Request) {
   const supabase = await createClient();
@@ -40,6 +40,7 @@ export async function GET(req: Request) {
   try {
     if (type === "personal") {
       // Fetch reseller's own purchases from transactions table
+      // Already uses 3-tier status resolution internally
       const transactions = await fetchMyPurchaseTransactionsForUser(user.id);
       return NextResponse.json({ orders: transactions, type: "personal" });
     } else if (type === "store") {
@@ -62,10 +63,26 @@ export async function GET(req: Request) {
         return NextResponse.json({ error: "Failed to fetch store orders" }, { status: 500 });
       }
 
-      // Convert DataKazina network IDs to display format
-      const convertedOrders = (storeOrders || []).map(order => ({
+      // Fetch admin overrides for these orders
+      const orderReferences = (storeOrders || [])
+        .map((o: any) => o.paystack_transaction_id || o.id)
+        .filter(Boolean);
+
+      const { data: overrides } = await admin
+        .from("provider_order_overrides")
+        .select("transaction_id,status")
+        .in("transaction_id", orderReferences);
+
+      const overrideMap = new Map(
+        (overrides || []).map((o: any) => [o.transaction_id, o.status])
+      );
+
+      // Convert DataKazina network IDs to display format and apply status overrides
+      const convertedOrders = (storeOrders || []).map((order: any) => ({
         ...order,
         network_id: order.network_id ? datakazinaNetworkIdToDisplay(order.network_id) : null,
+        // Apply 3-tier resolution: override > db status
+        status: overrideMap.get(order.paystack_transaction_id || order.id) || order.status,
       }));
 
       return NextResponse.json({ orders: convertedOrders, type: "store" });

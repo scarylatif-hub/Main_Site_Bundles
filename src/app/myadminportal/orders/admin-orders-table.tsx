@@ -395,12 +395,16 @@ export function AdminOrdersTable({
                         )}
                       </TableCell>
                       <TableCell className="text-sm whitespace-nowrap">
-                        <div className="font-medium">{row.customerEmail}</div>
-                        {row.customerName && (
-                          <div className="text-xs text-muted-foreground">
-                            {row.customerName}
-                            {row.isStore && <span className="ml-1 text-orange-600 font-medium">(store)</span>}
-                          </div>
+                        {row.isStore ? (
+                          <>
+                            <div className="font-medium text-sm">{row.customerEmail}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {row.customerName}
+                              <span className="ml-1 text-orange-600 font-medium">(store)</span>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="font-medium">{row.customerEmail}</div>
                         )}
                       </TableCell>
                       <TableCell className="text-sm whitespace-nowrap">
