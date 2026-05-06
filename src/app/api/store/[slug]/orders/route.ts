@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { datakazinaAPI } from "@/lib/datakazina";
 import { datakazinaNetworkIdToDisplay } from "@/lib/network-id-map";
+import {
+  fetchExternalAllOrdersRaw,
+  normalizeExternalOrder,
+  resolveOrderStatusFromSources,
+  type AdminOrderRow,
+} from "@/lib/external-all-orders";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +25,6 @@ export async function GET(
 
     const admin = createAdminClient();
 
-    // Fetch store owner profile by slug
     const { data: storeOwner } = await admin
       .from("profiles")
       .select("*")
@@ -30,7 +35,6 @@ export async function GET(
       return NextResponse.json({ error: "Store not found" }, { status: 404 });
     }
 
-    // Fetch orders from database for this store and phone
     const { data: orders } = await admin
       .from("orders")
       .select("*")
@@ -38,38 +42,73 @@ export async function GET(
       .eq("customer_phone", phone)
       .order("created_at", { ascending: false });
 
-    // Fetch admin overrides for these orders (3-tier resolution - tier 1)
     const orderReferences = (orders || [])
-      .map((o: any) => o.paystack_transaction_id || o.id)
+      .flatMap((order: any) => [
+        order.paystack_transaction_id,
+        order.payment_reference,
+        order.id,
+      ])
       .filter(Boolean);
 
-    const { data: overrides } = await admin
-      .from("provider_order_overrides")
-      .select("transaction_id,status")
-      .in("transaction_id", orderReferences);
+    const [{ data: overrides }, rawExternal, pkgResult] = await Promise.all([
+      admin
+        .from("provider_order_overrides")
+        .select("transaction_id,status")
+        .in("transaction_id", orderReferences.length > 0 ? orderReferences : ["__none__"]),
+      fetchExternalAllOrdersRaw(),
+      datakazinaAPI.fetchDataPackages(),
+    ]);
 
-    const overrideMap = new Map(
-      (overrides || []).map((o: any) => [o.transaction_id, o.status])
-    );
-
-    // Fetch packages to get names
-    const pkgResult = await datakazinaAPI.fetchDataPackages();
     if (!pkgResult.ok || !pkgResult.data) {
       console.error("[store/orders] Failed to fetch packages from provider");
       return NextResponse.json({ error: "Failed to fetch packages" }, { status: 502 });
     }
-    const packageMap = new Map(
-      pkgResult.data.map((pkg: any) => [pkg.id, pkg.name || pkg.description || `Package ${pkg.id}`])
+
+    const externalRows: AdminOrderRow[] = [];
+    const noProfiles = new Map<string, { email: string; name: string; id: string }>();
+    for (const raw of rawExternal) {
+      const row = normalizeExternalOrder(raw, noProfiles);
+      if (row) externalRows.push(row);
+    }
+
+    const overridesRecord = Object.fromEntries(
+      (overrides || []).map((row: any) => [row.transaction_id, row.status])
     );
 
-    const enrichedOrders = orders?.map((order: any) => ({
-      ...order,
-      package_name: packageMap.get(order.package_id) || `Package ${order.package_id}`,
-      // Convert DataKazina network IDs to display format
-      network_id: order.network_id ? datakazinaNetworkIdToDisplay(order.network_id) : null,
-      // Apply 3-tier resolution: override (tier 1) > db status (tier 3)
-      status: overrideMap.get(order.paystack_transaction_id || order.id) || order.status,
-    })) || [];
+    const packageMap = new Map(
+      pkgResult.data.map((pkg: any) => [
+        pkg.id,
+        pkg.name || pkg.description || `Package ${pkg.id}`,
+      ])
+    );
+
+    const enrichedOrders =
+      orders?.map((order: any) => {
+        const resolved = resolveOrderStatusFromSources({
+          candidateKeys: [
+            order.paystack_transaction_id,
+            order.payment_reference,
+            order.id,
+          ].filter(Boolean),
+          createdAt: order.created_at,
+          recipientMsisdn: order.customer_phone || order.phone_number,
+          amount: Math.abs(Number(order.amount || 0)),
+          networkId: order.network_id,
+          fallbackStatus: order.status,
+          externalRows,
+          overrides: overridesRecord,
+        });
+
+        return {
+          ...order,
+          package_name:
+            packageMap.get(order.package_id) || `Package ${order.package_id}`,
+          network_id: order.network_id
+            ? datakazinaNetworkIdToDisplay(order.network_id)
+            : null,
+          status: resolved.status,
+        };
+      }) || [];
 
     return NextResponse.json({
       success: true,

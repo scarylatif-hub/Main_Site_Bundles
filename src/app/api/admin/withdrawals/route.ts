@@ -34,6 +34,8 @@ export async function GET(req: NextRequest) {
         phone_number
       )
     `)
+    .eq("source", "earnings")
+    .eq("method", "momo")
     .order("created_at", { ascending: false })
     .limit(100);
 
@@ -107,25 +109,6 @@ export async function PATCH(req: NextRequest) {
     if (updateError) {
       console.error("Withdrawal update error:", updateError);
       return NextResponse.json({ error: "Failed to update withdrawal" }, { status: 500 });
-    }
-
-    // If rejected, restore wallet balance (since it was deducted on request)
-    if (status === "rejected") {
-      const { data: userProfile } = await admin
-        .from("profiles")
-        .select("wallet_balance")
-        .eq("id", withdrawal.user_id)
-        .single();
-
-      if (userProfile) {
-        const currentBalance = Number(userProfile.wallet_balance || 0);
-        const newBalance = currentBalance + withdrawal.amount;
-        
-        await admin
-          .from("profiles")
-          .update({ wallet_balance: newBalance })
-          .eq("id", withdrawal.user_id);
-      }
     }
 
     return NextResponse.json({

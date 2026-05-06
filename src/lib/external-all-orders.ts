@@ -29,6 +29,20 @@ export type AdminOrderRow = {
   isStore: boolean;
 };
 
+export type ExternalOrderMatchInput = {
+  candidateKeys: string[];
+  createdAt: string;
+  recipientMsisdn?: string | null;
+  amount: number;
+  networkId?: number | null;
+};
+
+export type OrderStatusResolutionInput = ExternalOrderMatchInput & {
+  fallbackStatus: string;
+  externalRows: AdminOrderRow[];
+  overrides?: Record<string, string>;
+};
+
 function pick<T extends Record<string, unknown>>(o: T, keys: string[]): unknown {
   for (const k of keys) {
     if (o[k] !== undefined && o[k] !== null && o[k] !== "") return o[k];
@@ -46,6 +60,122 @@ function normalizePhone(p: string | null | undefined): string | null {
   if (!p) return null;
   const n = normalizePhoneNumber(String(p).trim());
   return n.length >= 10 ? n : null;
+}
+
+export function adminOrderRowKeys(row: AdminOrderRow): string[] {
+  return [
+    row.reference,
+    row.transaction_code,
+    row.provider_order_id,
+    row.id,
+  ]
+    .map((key) => (key != null ? String(key).trim() : ""))
+    .filter(Boolean);
+}
+
+export function findManualOverrideStatus(
+  candidateKeys: string[],
+  overrides: Record<string, string> = {}
+): string | undefined {
+  for (const key of candidateKeys) {
+    const normalizedKey = String(key || "").trim();
+    if (!normalizedKey) continue;
+    const status = overrides[normalizedKey];
+    if (status) {
+      return status;
+    }
+  }
+  return undefined;
+}
+
+export function findMatchingExternalAdminRow(
+  input: ExternalOrderMatchInput,
+  externalRows: AdminOrderRow[]
+): AdminOrderRow | undefined {
+  const inputKeySet = new Set(
+    (input.candidateKeys || [])
+      .map((key) => String(key || "").trim())
+      .filter(Boolean)
+  );
+
+  const exact = externalRows.find((row) =>
+    adminOrderRowKeys(row).some((key) => inputKeySet.has(key))
+  );
+  if (exact) {
+    return exact;
+  }
+
+  const localTime = new Date(input.createdAt).getTime();
+  const localPhone = normalizePhone(input.recipientMsisdn);
+  const localAmount = Math.abs(Number(input.amount || 0));
+
+  const candidates = externalRows.filter((row) => {
+    if (localPhone) {
+      const rowPhone = normalizePhone(row.recipient_msisdn);
+      if (rowPhone !== localPhone) {
+        return false;
+      }
+    }
+
+    if (
+      input.networkId != null &&
+      row.network_id != null &&
+      input.networkId !== row.network_id
+    ) {
+      return false;
+    }
+
+    return Math.abs(Math.abs(Number(row.amount || 0)) - localAmount) <= 0.06;
+  });
+
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  candidates.sort((a, b) => {
+    const aDelta = Math.abs(new Date(a.created_at).getTime() - localTime);
+    const bDelta = Math.abs(new Date(b.created_at).getTime() - localTime);
+    return aDelta - bDelta;
+  });
+
+  return candidates[0];
+}
+
+export function resolveOrderStatusFromSources(
+  input: OrderStatusResolutionInput
+): { status: string; matchedExternal?: AdminOrderRow } {
+  const localOverride = findManualOverrideStatus(
+    input.candidateKeys,
+    input.overrides
+  );
+  if (localOverride) {
+    return { status: localOverride };
+  }
+
+  const matchedExternal = findMatchingExternalAdminRow(
+    {
+      candidateKeys: input.candidateKeys,
+      createdAt: input.createdAt,
+      recipientMsisdn: input.recipientMsisdn,
+      amount: input.amount,
+      networkId: input.networkId,
+    },
+    input.externalRows
+  );
+
+  if (!matchedExternal) {
+    return { status: input.fallbackStatus };
+  }
+
+  const externalOverride = findManualOverrideStatus(
+    adminOrderRowKeys(matchedExternal),
+    input.overrides
+  );
+
+  return {
+    status: externalOverride ?? matchedExternal.status ?? input.fallbackStatus,
+    matchedExternal,
+  };
 }
 
 /** Resolve display network id from API label (MTN, Telecel, AirtelTigo / AT-iShare, etc.) */

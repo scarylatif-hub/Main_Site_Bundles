@@ -267,6 +267,22 @@ export async function POST(req: NextRequest) {
   // It will be available as earnings in the reseller dashboard
   // Do NOT credit wallet balance - earnings should be moved to wallet manually
 
+  // Create detailed profit record for store order
+  const profitMargin = ((resellerProfit / Number(amount)) * 100).toFixed(2);
+  const platformProfit = Number(amount) - resellerCost - resellerProfit;
+  
+  await admin
+    .from("profit_records")
+    .insert({
+      order_id: newOrder.id,
+      store_id: store_id,
+      actual_cost: resellerCost,
+      selling_price: Number(amount),
+      reseller_profit: resellerProfit > 0 ? resellerProfit : 0,
+      platform_profit: platformProfit,
+      profit_margin: Number(profitMargin),
+    });
+
   // Send ntfy notification for successful store order
   const ntfyMessage = `
 🛒 STORE ORDER COMPLETED

@@ -95,7 +95,7 @@ export async function GET(request: NextRequest) {
       .from('profiles')
       .select('*')
       .eq('id', session.user.id)
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.error('Error fetching profile:', error);
@@ -105,7 +105,18 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    return NextResponse.json(profile);
+    if (!profile) {
+      return NextResponse.json(
+        { error: 'Profile not found' },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json(profile, {
+      headers: {
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
+      },
+    });
   } catch (error) {
     console.error('Error in GET /api/auth/profile:', error);
     return NextResponse.json(

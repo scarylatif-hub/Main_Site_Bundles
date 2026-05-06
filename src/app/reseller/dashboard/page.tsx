@@ -2,7 +2,9 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useAuth } from "@/context/auth-context";
+import { format } from "date-fns";
 import { PageHeader } from "@/components/page-header";
 import { toast } from "@/hooks/use-toast";
 import { getStoreUrl } from "@/lib/app-config";
@@ -29,6 +31,15 @@ import { MoveToWalletDialog } from "@/components/reseller/move-to-wallet-dialog"
 import { ResellerOrdersTable } from "@/components/reseller/reseller-orders-table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Profile } from "@/lib/definitions";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 type StoreStats = {
   totalEarnings: number;
@@ -38,9 +49,22 @@ type StoreStats = {
   totalOrders: number;
 };
 
+type WithdrawalRequest = {
+  id: string;
+  amount: number;
+  status: string;
+  momo_number: string | null;
+  momo_name: string | null;
+  reference: string | null;
+  created_at: string;
+  processed_at?: string | null;
+  completed_at?: string | null;
+};
+
 export default function ResellerDashboard() {
   const { user, userProfile, loading, logout, refreshUser } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
 
   // Early return for non-resellers - BEFORE any other hooks
   if (!loading && userProfile && !userProfile?.is_reseller) {
@@ -76,6 +100,8 @@ export default function ResellerDashboard() {
   const [personalOrders, setPersonalOrders] = useState<any[]>([]);
   const [storeOrders, setStoreOrders] = useState<any[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(false);
+  const [withdrawals, setWithdrawals] = useState<WithdrawalRequest[]>([]);
+  const [loadingWithdrawals, setLoadingWithdrawals] = useState(false);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -87,8 +113,9 @@ export default function ResellerDashboard() {
     if (userProfile?.is_reseller) {
       fetchStats();
       fetchOrders("personal"); // Load personal orders initially
+      fetchWithdrawals();
     }
-  }, [userProfile]);
+  }, [userProfile, pathname]);
 
   useEffect(() => {
     if (ordersTab === "store" && storeOrders.length === 0) {
@@ -98,7 +125,7 @@ export default function ResellerDashboard() {
 
   const fetchStats = async () => {
     try {
-      const res = await fetch("/api/reseller/stats");
+      const res = await fetch("/api/reseller/stats", { cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
         setStats(data);
@@ -115,7 +142,9 @@ export default function ResellerDashboard() {
     
     setLoadingOrders(true);
     try {
-      const res = await fetch(`/api/reseller/orders?type=${type}`);
+      const res = await fetch(`/api/reseller/orders?type=${type}`, {
+        cache: "no-store",
+      });
       if (res.ok) {
         const data = await res.json();
         if (type === "personal") {
@@ -129,6 +158,47 @@ export default function ResellerDashboard() {
     } finally {
       setLoadingOrders(false);
     }
+  };
+
+  const fetchWithdrawals = async () => {
+    if (!userProfile?.is_reseller) return;
+
+    setLoadingWithdrawals(true);
+    try {
+      const res = await fetch("/api/reseller/withdrawals", {
+        cache: "no-store",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setWithdrawals(data.withdrawals || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch withdrawals:", error);
+    } finally {
+      setLoadingWithdrawals(false);
+    }
+  };
+
+  const getWithdrawalBadge = (status: string) => {
+    const normalized = String(status || "").toLowerCase();
+
+    if (normalized === "completed") {
+      return <Badge className="bg-green-600 text-white">Completed</Badge>;
+    }
+
+    if (normalized === "rejected") {
+      return (
+        <Badge variant="secondary" className="bg-red-100 text-red-800">
+          Rejected
+        </Badge>
+      );
+    }
+
+    return (
+      <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
+        Pending
+      </Badge>
+    );
   };
 
   const copyStoreUrl = () => {
@@ -242,7 +312,12 @@ export default function ResellerDashboard() {
                 Available for withdrawal (from store profits)
               </p>
               {!loadingStats && (
-                <WithdrawalDialog walletBalance={stats.totalEarnings} />
+                <WithdrawalDialog
+                  walletBalance={stats.totalEarnings}
+                  onSuccess={async () => {
+                    await Promise.all([fetchStats(), fetchWithdrawals()]);
+                  }}
+                />
               )}
             </div>
 
@@ -284,6 +359,84 @@ export default function ResellerDashboard() {
               <p className="text-xs text-muted-foreground">Orders processed</p>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Withdrawal History */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>Withdrawal History</CardTitle>
+          <CardDescription>
+            Track your payout requests and see when they have been treated.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loadingWithdrawals ? (
+            <div className="text-sm text-muted-foreground">Loading withdrawal requests...</div>
+          ) : withdrawals.length === 0 ? (
+            <div className="text-sm text-muted-foreground">
+              No withdrawal requests yet.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Amount</TableHead>
+                    <TableHead>MoMo</TableHead>
+                    <TableHead>Reference</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Treated</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {withdrawals.map((withdrawal) => {
+                    const treatedAt =
+                      withdrawal.completed_at ||
+                      withdrawal.processed_at ||
+                      null;
+
+                    return (
+                      <TableRow key={withdrawal.id}>
+                        <TableCell>
+                          <div>{format(new Date(withdrawal.created_at), "MMM d")}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {format(new Date(withdrawal.created_at), "h:mm a")}
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          ₵{Number(withdrawal.amount || 0).toFixed(2)}
+                        </TableCell>
+                        <TableCell>
+                          <div>{withdrawal.momo_name || "—"}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {withdrawal.momo_number || "—"}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {withdrawal.reference || "—"}
+                        </TableCell>
+                        <TableCell>{getWithdrawalBadge(withdrawal.status)}</TableCell>
+                        <TableCell>
+                          {treatedAt ? (
+                            <>
+                              <div>{format(new Date(treatedAt), "MMM d")}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {format(new Date(treatedAt), "h:mm a")}
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Waiting</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
 

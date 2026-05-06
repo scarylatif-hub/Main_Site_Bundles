@@ -33,7 +33,9 @@ export default function Home() {
     const fetchPackages = async () => {
       try {
         setIsLoading(true);
-        const response = await fetch('/api/packages');
+        const response = await fetch('/api/packages', {
+          cache: 'no-store',
+        });
         if (!response.ok) throw new Error('Failed to fetch packages');
         const data = await response.json();
         setAllPackages(Array.isArray(data) ? data : []);

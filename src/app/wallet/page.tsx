@@ -13,6 +13,7 @@ import type { Transaction } from '@/lib/definitions';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { WalletDepositCard } from '@/components/wallet-deposit-card';
+import { usePathname } from 'next/navigation';
 import {
   TablePaginationBar,
   PAGE_SIZE,
@@ -20,6 +21,7 @@ import {
 
 export default function WalletPage() {
     const { user, loading, userProfile } = useAuth();
+    const pathname = usePathname();
     const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [isFetching, setIsFetching] = useState(true);
     const [txPageIndex, setTxPageIndex] = useState(0);
@@ -53,7 +55,7 @@ export default function WalletPage() {
         if (!loading) {
             fetchTransactions();
         }
-    }, [loading, fetchTransactions]);
+    }, [loading, fetchTransactions, pathname]);
 
     const txPageCount = Math.max(1, Math.ceil(transactions.length / PAGE_SIZE));
     const pagedTransactions = useMemo(() => {

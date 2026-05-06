@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useAuth } from "@/context/auth-context";
 import { toast } from "@/hooks/use-toast";
 import {
   Dialog,
@@ -16,8 +15,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Wallet, Smartphone } from "lucide-react";
 
-export function WithdrawalDialog({ walletBalance }: { walletBalance: number }) {
-  const { user } = useAuth();
+export function WithdrawalDialog({
+  walletBalance,
+  onSuccess,
+}: {
+  walletBalance: number;
+  onSuccess?: () => void | Promise<void>;
+}) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [amount, setAmount] = useState("");
@@ -76,8 +80,7 @@ export function WithdrawalDialog({ walletBalance }: { walletBalance: number }) {
       setMomoNumber("");
       setMomoName("");
       
-      // Refresh stats
-      window.location.reload();
+      await onSuccess?.();
     } catch (error) {
       toast({ 
         title: "Error", 

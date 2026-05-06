@@ -1,29 +1,19 @@
 "use client";
 
-// src/context/auth-context.tsx
-
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useMemo,
+  useRef,
   useState,
-  useCallback,
   type ReactNode,
 } from "react";
 import { supabase } from "@/lib/supabase/client";
-import { type User, type Session } from "@supabase/supabase-js";
 import type { Profile } from "@/lib/definitions";
-import { useRouter } from "next/navigation";
-
-// Simple debounce function
-function debounce<T extends (...args: any[]) => any>(func: T, wait: number): T {
-  let timeout: NodeJS.Timeout;
-  return ((...args: Parameters<T>) => {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func(...args), wait);
-  }) as T;
-}
-
+import { usePathname, useRouter } from "next/navigation";
+import { type Session, type User } from "@supabase/supabase-js";
 
 export type AuthContextType = {
   user: User | null;
@@ -31,147 +21,178 @@ export type AuthContextType = {
   session: Session | null;
   loading: boolean;
   logout: () => Promise<void>;
-  refreshUser: () => void;
+  refreshUser: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function normalizeProfile(data: any): Profile {
+  return {
+    ...data,
+    wallet_balance: Number(data?.wallet_balance ?? 0),
+    is_admin: Boolean(data?.is_admin),
+  } as Profile;
+}
+
 async function fetchProfile(userId: string): Promise<Profile | null> {
   try {
-    const { data, error, status } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", userId)
-      .single();
+    const response = await fetch("/api/auth/profile", {
+      credentials: "include",
+      cache: "no-store",
+      headers: {
+        "x-profile-user-id": userId,
+      },
+    });
 
-    // 406 = no row found (expected for brand new users before profile is created)
-    if (error && status !== 406) {
-      // Handle lock broken errors gracefully - these are temporary Supabase session conflicts
-      if (error.message.includes("Lock broken") || error.message.includes("steal") || error.message.includes("orphaned lock")) {
-        console.warn("fetchProfile: Temporary session conflict, retrying...");
-        await new Promise(resolve => setTimeout(resolve, 200));
-        return fetchProfile(userId);
-      }
-      console.error("fetchProfile error:", error);
+    if (response.status === 401 || response.status === 404) {
       return null;
     }
 
-    if (!data) return null;
-
-    return {
-      ...data,
-      wallet_balance: Number(data.wallet_balance ?? 0),
-      is_admin: Boolean(data.is_admin),
-    } as Profile;
-  } catch (e) {
-    // Handle lock broken errors at the catch level too
-    if (e instanceof Error && (e.message.includes("Lock broken") || e.message.includes("steal") || e.message.includes("orphaned lock"))) {
-      console.warn("fetchProfile: Temporary session conflict in catch, retrying...");
-      await new Promise(resolve => setTimeout(resolve, 200));
-      return fetchProfile(userId);
+    if (!response.ok) {
+      const message = await response.text().catch(() => "");
+      console.error("fetchProfile API error:", response.status, message);
+      return null;
     }
-    console.error("fetchProfile unexpected error:", e);
+
+    const profile = await response.json();
+    if (!profile) {
+      return null;
+    }
+
+    return normalizeProfile(profile);
+  } catch (error) {
+    console.error("fetchProfile unexpected error:", error);
     return null;
   }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const [user, setUser]               = useState<User | null>(null);
+  const pathname = usePathname();
+  const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<Profile | null>(null);
-  const [session, setSession]         = useState<Session | null>(null);
-  const [loading, setLoading]         = useState(true);
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+  const profileRequestIdRef = useRef(0);
 
-  const applySession = useCallback(async (s: Session | null) => {
-    setSession(s);
-    const u = s?.user ?? null;
-    setUser(u);
-    if (u) {
-      const profile = await fetchProfile(u.id);
+  const syncSession = useCallback(
+    async (nextSession: Session | null, options?: { keepLoading?: boolean }) => {
+      const keepLoading = options?.keepLoading ?? false;
+      const nextUser = nextSession?.user ?? null;
+
+      setSession(nextSession);
+      setUser(nextUser);
+
+      if (!keepLoading) {
+        setLoading(true);
+      }
+
+      const requestId = ++profileRequestIdRef.current;
+
+      if (!nextUser) {
+        setUserProfile(null);
+        setLoading(false);
+        return;
+      }
+
+      const profile = await fetchProfile(nextUser.id);
+      if (profileRequestIdRef.current !== requestId) {
+        return;
+      }
+
       setUserProfile(profile);
-    } else {
-      setUserProfile(null);
-    }
-  }, []);
-
-  // Debounced version to prevent rapid successive calls
-  const debouncedApplySession = useCallback(
-    debounce(async (s: Session | null) => {
-      await applySession(s);
-    }, 200),
-    [applySession]
+      setLoading(false);
+    },
+    []
   );
+
+  const refreshUser = useCallback(async () => {
+    const currentUserId = user?.id;
+    if (!currentUserId) {
+      setUserProfile(null);
+      return;
+    }
+
+    const requestId = ++profileRequestIdRef.current;
+    const profile = await fetchProfile(currentUserId);
+    if (profileRequestIdRef.current !== requestId) {
+      return;
+    }
+
+    setUserProfile(profile);
+  }, [user?.id]);
 
   useEffect(() => {
     let mounted = true;
 
-    // Initialize auth state - use getSession() for initial load to avoid server calls
-    supabase.auth.getSession().then(async ({ data: { session: s } }) => {
-      if (!mounted) return;
-      await applySession(s);
-      if (mounted) setLoading(false);
+    supabase.auth.getSession().then(async ({ data: { session: initialSession } }) => {
+      if (!mounted) {
+        return;
+      }
+      await syncSession(initialSession);
     });
 
-    // Listen for auth state changes with better session handling
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, s) => {
-        if (!mounted) return;
-        console.log("Auth state change:", event, s?.user?.email);
-        await applySession(s);
-        if (event === "SIGNED_OUT") {
-          setUserProfile(null);
-          // Clear any local storage data if needed
-          localStorage.removeItem('supabase.auth.token');
-        } else if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
-          // Session refreshed or new sign in - ensure profile is loaded
-          if (s?.user) {
-            const profile = await fetchProfile(s.user.id);
-            if (profile) setUserProfile(profile);
-          }
-        }
-        setLoading(false);
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
+      if (!mounted) {
+        return;
       }
-    );
+      await syncSession(nextSession);
+    });
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [applySession]);
+  }, [syncSession]);
 
-  const refreshUser = useCallback(() => {
-    if (user) {
-      fetchProfile(user.id).then((profile) => {
-        if (profile) setUserProfile(profile);
-      });
+  useEffect(() => {
+    if (!session?.user?.id) {
+      return;
     }
-  }, [user]);
 
-  const logout = async () => {
+    void refreshUser();
+  }, [pathname, session?.user?.id, refreshUser]);
+
+  const logout = useCallback(async () => {
     setLoading(true);
+
     try {
       try {
         await fetch("/api/auth/signout", {
           method: "POST",
           credentials: "same-origin",
+          cache: "no-store",
         });
-      } catch {
+      } finally {
         await supabase.auth.signOut();
       }
+
+      setUser(null);
+      setUserProfile(null);
+      setSession(null);
       router.push("/login");
-    } catch (e) {
-      console.error("logout error:", e);
+      router.refresh();
+    } catch (error) {
+      console.error("logout error:", error);
       setLoading(false);
     }
-  };
+  }, [router]);
 
-  return (
-    <AuthContext.Provider
-      value={{ user, session, userProfile, loading, logout, refreshUser }}
-    >
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo(
+    () => ({
+      user,
+      session,
+      userProfile,
+      loading,
+      logout,
+      refreshUser,
+    }),
+    [user, session, userProfile, loading, logout, refreshUser]
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

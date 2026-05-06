@@ -178,6 +178,8 @@ export async function GET(req: NextRequest) {
     .from("earnings_to_wallet_transfers")
     .select("*")
     .eq("user_id", user.id)
+    .eq("source", "earnings")
+    .eq("method", "momo")
     .order("created_at", { ascending: false })
     .limit(50);
 

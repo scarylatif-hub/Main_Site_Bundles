@@ -1,9 +1,13 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  adminOrderRowKeys,
   buildPhoneProfileMap,
   enrichAdminOrderRowsWithLedgerBuyers,
   fetchExternalAllOrdersRaw,
+  findManualOverrideStatus,
+  findMatchingExternalAdminRow,
   normalizeExternalOrder,
+  resolveOrderStatusFromSources,
   storeOrderToAdminRow,
   transactionToAdminRow,
   type AdminOrderRow,
@@ -28,67 +32,10 @@ type DbPurchaseRow = {
   transaction_type: string | null;
 };
 
-function rowKeys(row: AdminOrderRow): string[] {
-  return [
-    row.reference,
-    row.transaction_code,
-    row.provider_order_id,
-    row.id,
-  ]
-    .map((key) => (key != null ? String(key).trim() : ""))
-    .filter(Boolean);
-}
-
 function purchaseKeys(row: DbPurchaseRow): string[] {
   return [row.reference, row.transaction_code, row.id]
     .map((key) => (key != null ? String(key).trim() : ""))
     .filter(Boolean);
-}
-
-function findMatchingExternalRow(
-  purchase: DbPurchaseRow,
-  externalRows: AdminOrderRow[]
-): AdminOrderRow | undefined {
-  const purchaseKeySet = new Set(purchaseKeys(purchase));
-  const exact = externalRows.find((row) =>
-    rowKeys(row).some((key) => purchaseKeySet.has(key))
-  );
-
-  if (exact) {
-    return exact;
-  }
-
-  const purchaseTime = new Date(purchase.created_at).getTime();
-  const purchasePhone = String(purchase.recipient_msisdn || "").trim();
-  const purchaseAmount = Math.abs(Number(purchase.amount || 0));
-
-  const candidates = externalRows.filter((row) => {
-    if (purchasePhone && row.recipient_msisdn && row.recipient_msisdn !== purchasePhone) {
-      return false;
-    }
-
-    if (
-      purchase.network_id != null &&
-      row.network_id != null &&
-      purchase.network_id !== row.network_id
-    ) {
-      return false;
-    }
-
-    return Math.abs(Math.abs(Number(row.amount || 0)) - purchaseAmount) <= 0.06;
-  });
-
-  if (candidates.length === 0) {
-    return undefined;
-  }
-
-  candidates.sort((a, b) => {
-    const aDelta = Math.abs(new Date(a.created_at).getTime() - purchaseTime);
-    const bDelta = Math.abs(new Date(b.created_at).getTime() - purchaseTime);
-    return aDelta - bDelta;
-  });
-
-  return candidates[0];
 }
 
 export default async function MyAdminOrdersPage() {
@@ -115,6 +62,17 @@ export default async function MyAdminOrdersPage() {
       email: profile.email || "—",
       name: profile.full_name || "",
     });
+  }
+
+  const { data: ovRows } = await admin
+    .from("provider_order_overrides")
+    .select("transaction_id,status");
+
+  const overrides: Record<string, string> = {};
+  for (const row of ovRows ?? []) {
+    if (row.transaction_id) {
+      overrides[row.transaction_id] = row.status;
+    }
   }
 
   // Fetch external API orders (main site)
@@ -177,20 +135,94 @@ export default async function MyAdminOrdersPage() {
 
   // Convert store orders to AdminOrderRow format
   const storeRows: AdminOrderRow[] = [];
+  const matchedExternalKeys = new Set<string>();
   for (const order of storeOrders || []) {
     const storeName = storeNameMap.get(order.store_id) || "Unknown Store";
     const bundleAmount = packageMap.get(order.package_id) || null;
     const row = storeOrderToAdminRow(order, storeName, bundleAmount);
+
+    const resolved = resolveOrderStatusFromSources({
+      candidateKeys: [
+        order.paystack_transaction_id,
+        order.payment_reference,
+        order.id,
+      ].filter(Boolean),
+      createdAt: order.created_at,
+      recipientMsisdn: order.customer_phone || order.phone_number,
+      amount: Math.abs(Number(order.amount || 0)),
+      networkId: order.network_id,
+      fallbackStatus: row.status,
+      externalRows,
+      overrides,
+    });
+    const externalMatch =
+      resolved.matchedExternal ||
+      findMatchingExternalAdminRow(
+        {
+          candidateKeys: [
+            order.paystack_transaction_id,
+            order.payment_reference,
+            order.id,
+          ].filter(Boolean),
+          createdAt: order.created_at,
+          recipientMsisdn: order.customer_phone || order.phone_number,
+          amount: Math.abs(Number(order.amount || 0)),
+          networkId: order.network_id,
+        },
+        externalRows
+      );
+
+    if (externalMatch) {
+      row.reference = externalMatch.reference || row.reference;
+      row.provider_order_id = externalMatch.provider_order_id;
+      row.transaction_code =
+        externalMatch.transaction_code || row.transaction_code;
+      row.created_at = externalMatch.created_at || row.created_at;
+      row.recipient_msisdn =
+        externalMatch.recipient_msisdn || row.recipient_msisdn;
+      row.network_id = externalMatch.network_id ?? row.network_id;
+      row.network_label =
+        externalMatch.network_label ?? row.network_label;
+      row.bundle_amount =
+        externalMatch.bundle_amount || row.bundle_amount;
+      row.amount = Math.abs(Number(externalMatch.amount || row.amount));
+
+      for (const key of adminOrderRowKeys(externalMatch)) {
+        matchedExternalKeys.add(key);
+      }
+    }
+
+    row.status = resolved.status;
     storeRows.push(row);
   }
   console.log(`Processed ${storeRows.length} store orders`);
 
   // Convert main-site purchases to AdminOrderRow format and enrich with provider data
   const directRows: AdminOrderRow[] = [];
-  const matchedExternalKeys = new Set<string>();
   for (const purchase of (purchases || []) as DbPurchaseRow[]) {
     const directRow = transactionToAdminRow(purchase, profileByUserId);
-    const externalMatch = findMatchingExternalRow(purchase, externalRows);
+    const resolved = resolveOrderStatusFromSources({
+      candidateKeys: purchaseKeys(purchase),
+      createdAt: purchase.created_at,
+      recipientMsisdn: purchase.recipient_msisdn,
+      amount: Math.abs(Number(purchase.amount || 0)),
+      networkId: purchase.network_id,
+      fallbackStatus: directRow.status,
+      externalRows,
+      overrides,
+    });
+    const externalMatch =
+      resolved.matchedExternal ||
+      findMatchingExternalAdminRow(
+        {
+          candidateKeys: purchaseKeys(purchase),
+          createdAt: purchase.created_at,
+          recipientMsisdn: purchase.recipient_msisdn,
+          amount: Math.abs(Number(purchase.amount || 0)),
+          networkId: purchase.network_id,
+        },
+        externalRows
+      );
 
     if (externalMatch) {
       directRow.reference = externalMatch.reference || directRow.reference;
@@ -205,21 +237,31 @@ export default async function MyAdminOrdersPage() {
         externalMatch.network_label ?? directRow.network_label;
       directRow.bundle_amount =
         externalMatch.bundle_amount || directRow.bundle_amount;
-      directRow.status = externalMatch.status || directRow.status;
       directRow.amount = Math.abs(Number(externalMatch.amount || directRow.amount));
 
-      for (const key of rowKeys(externalMatch)) {
+      for (const key of adminOrderRowKeys(externalMatch)) {
         matchedExternalKeys.add(key);
       }
     }
 
+    directRow.status = resolved.status;
     directRows.push(directRow);
   }
   console.log(`Processed ${directRows.length} main site purchase rows`);
 
   const unmatchedExternalRows = externalRows.filter(
-    (row) => !rowKeys(row).some((key) => matchedExternalKeys.has(key))
+    (row) => {
+      const keys = adminOrderRowKeys(row);
+      return !keys.some((key) => matchedExternalKeys.has(key));
+    }
   );
+
+  for (const row of unmatchedExternalRows) {
+    const overrideStatus = findManualOverrideStatus(adminOrderRowKeys(row), overrides);
+    if (overrideStatus) {
+      row.status = overrideStatus;
+    }
+  }
   console.log(
     `Keeping ${unmatchedExternalRows.length} provider-only rows not found in local purchases`
   );
@@ -229,15 +271,6 @@ export default async function MyAdminOrdersPage() {
   console.log(
     `Total orders: ${allRows.length} (${directRows.length} direct + ${storeRows.length} store + ${unmatchedExternalRows.length} provider-only)`
   );
-
-  const { data: ovRows } = await admin
-    .from("provider_order_overrides")
-    .select("transaction_id,status");
-
-  const overrides: Record<string, string> = {};
-  for (const o of ovRows ?? []) {
-    if (o.transaction_id) overrides[o.transaction_id] = o.status;
-  }
 
   allRows.sort(
     (a, b) =>

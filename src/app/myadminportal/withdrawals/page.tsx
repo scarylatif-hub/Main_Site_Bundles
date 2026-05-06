@@ -46,6 +46,7 @@ type Withdrawal = {
   status: string;
   created_at: string;
   processed_at: string | null;
+  completed_at: string | null;
   reference: string | null;
   profiles: {
     full_name: string | null;
@@ -90,13 +91,22 @@ export default function AdminWithdrawalsPage() {
   const handleStatusUpdate = async (withdrawalId: string, status: string) => {
     setProcessing(withdrawalId);
     try {
-      const res = await fetch("/api/admin/withdrawals", {
-        method: "PATCH",
+      const endpoint =
+        status === "completed"
+          ? `/api/admin/withdrawals/${withdrawalId}/complete`
+          : "/api/admin/withdrawals";
+      const method = status === "completed" ? "POST" : "PATCH";
+
+      const res = await fetch(endpoint, {
+        method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ withdrawalId, status }),
+        body:
+          status === "completed"
+            ? undefined
+            : JSON.stringify({ withdrawalId, status }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
       if (!res.ok) {
         throw new Error(data.error || "Failed to update withdrawal");
@@ -226,7 +236,7 @@ export default function AdminWithdrawalsPage() {
                                 disabled={processing === withdrawal.id}
                               >
                                 <CheckCircle2 className="h-4 w-4 mr-2" />
-                                Mark Complete
+                                Mark Done
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 onClick={() => handleStatusUpdate(withdrawal.id, "rejected")}
