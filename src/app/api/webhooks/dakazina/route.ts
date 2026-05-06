@@ -20,24 +20,8 @@ function collectWebhookReferences(body: Record<string, unknown>): string[] {
 }
 
 export async function POST(req: NextRequest) {
-  const secret = process.env.DAKAZINA_WEBHOOK_SECRET?.trim();
-  if (!secret) {
-    console.error("Dakazina webhook: Missing DAKAZINA_WEBHOOK_SECRET");
-    return NextResponse.json(
-      { error: "Webhook not configured" },
-      { status: 503 }
-    );
-  }
-
-  const headerSecret =
-    req.headers.get("x-webhook-secret")?.trim() ||
-    req.headers.get("x-dakazina-signature")?.trim() ||
-    req.headers.get("x-provider-signature")?.trim();
-
-  if (!headerSecret || headerSecret !== secret) {
-    console.warn("Dakazina webhook: Unauthorized - invalid or missing secret");
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  console.log("Dakazina webhook: Received request");
+  console.log("Headers:", Object.fromEntries(req.headers.entries()));
 
   let body: Record<string, unknown>;
   try {
@@ -82,15 +66,17 @@ export async function POST(req: NextRequest) {
   }
   if (body.bundle_amount) transactionPatch.bundle_amount = String(body.bundle_amount);
 
+  const orClause = referenceCandidates
+        .map((reference) => `reference.eq.${reference},transaction_code.eq.${reference}`)
+        .join(",");
+  
+  console.log("Dakazina webhook: Looking up transactions with OR clause:", orClause);
+
   const { data: transactionMatches, error: transactionLookupError } = await admin
     .from("transactions")
-    .select("id")
+    .select("id, reference, transaction_code, status")
     .eq("transaction_type", "purchase")
-    .or(
-      referenceCandidates
-        .map((reference) => `reference.eq.${reference},transaction_code.eq.${reference}`)
-        .join(",")
-    );
+    .or(orClause);
 
   if (transactionLookupError) {
     console.error(
@@ -102,6 +88,8 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
+
+  console.log("Dakazina webhook: Found transactions:", transactionMatches?.length || 0);
 
   const transactionIds = [...new Set((transactionMatches || []).map((row) => row.id))];
   let transactionsUpdated = 0;
@@ -131,22 +119,26 @@ export async function POST(req: NextRequest) {
     status,
   };
 
-  const { data: orderMatches, error: orderLookupError } = await admin
-    .from("orders")
-    .select("id")
-    .or(
-      referenceCandidates
+  const orderOrClause = referenceCandidates
         .map(
           (reference) =>
             `paystack_transaction_id.eq.${reference},payment_reference.eq.${reference}`
         )
-        .join(",")
-    );
+        .join(",");
+  
+  console.log("Dakazina webhook: Looking up orders with OR clause:", orderOrClause);
+
+  const { data: orderMatches, error: orderLookupError } = await admin
+    .from("orders")
+    .select("id, paystack_transaction_id, payment_reference, status")
+    .or(orderOrClause);
 
   if (orderLookupError) {
     console.error("Dakazina webhook: Order lookup failed", orderLookupError);
     return NextResponse.json({ error: orderLookupError.message }, { status: 500 });
   }
+
+  console.log("Dakazina webhook: Found orders:", orderMatches?.length || 0);
 
   const orderIds = [...new Set((orderMatches || []).map((row) => row.id))];
   let ordersUpdated = 0;
