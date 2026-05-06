@@ -1,39 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-
-// ntfy configuration
-const NTFY_TOPIC = process.env.NTFY_TOPIC || "bundle-ghana";
-const NTFY_URL = `https://ntfy.sh/${NTFY_TOPIC}`;
-
-async function sendNtfyNotification(title: string, message: string) {
-  try {
-    console.log("[move-to-wallet] Sending ntfy notification to:", NTFY_URL);
-    console.log("[move-to-wallet] Title:", title);
-    console.log("[move-to-wallet] Message length:", message.length);
-    
-    const response = await fetch(NTFY_URL, {
-      method: "POST",
-      headers: {
-        "Title": title,
-        "Priority": "high",
-      },
-      body: message,
-    });
-    
-    if (!response.ok) {
-      console.error("[move-to-wallet] Ntfy response error:", response.status, response.statusText);
-    } else {
-      console.log("[move-to-wallet] Ntfy notification sent successfully");
-    }
-  } catch (error) {
-    console.error("[move-to-wallet] Failed to send ntfy notification:", error);
-  }
-}
+import { notifyEarningsTransferredToWallet } from "@/lib/server/notifications";
+import { createClient } from "@/lib/supabase/server";
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -41,7 +15,6 @@ export async function POST(req: NextRequest) {
 
   const admin = createAdminClient();
 
-  // Get user profile
   const { data: profile } = await admin
     .from("profiles")
     .select("is_reseller, wallet_balance")
@@ -55,61 +28,48 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const { amount } = body;
 
-  // Validate amount
   const moveAmount = Number(amount);
   if (isNaN(moveAmount) || moveAmount < 0.01) {
-    return NextResponse.json({ error: "Minimum transfer amount is 0.01 GHS" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Minimum transfer amount is 0.01 GHS" },
+      { status: 400 }
+    );
   }
 
-  // Calculate total earnings from completed orders
   const { data: profitData } = await admin
     .from("orders")
     .select("reseller_profit")
     .eq("store_id", user.id)
     .eq("status", "completed");
 
-  let totalEarnings = 0;
-  if (profitData) {
-    totalEarnings = profitData.reduce((sum, order) => sum + (order.reseller_profit || 0), 0);
-  }
+  const totalEarnings = profitData
+    ? profitData.reduce((sum, order) => sum + (order.reseller_profit || 0), 0)
+    : 0;
 
-  // Calculate transferred amount from earnings_to_wallet_transfers table
   const { data: transferredData } = await admin
     .from("earnings_to_wallet_transfers")
     .select("amount")
     .eq("user_id", user.id)
-    .eq("status", "completed");
+    .eq("status", "completed")
+    .is("method", null);
 
-  let transferredAmount = 0;
-  if (transferredData) {
-    transferredAmount = transferredData.reduce((sum, transfer) => sum + transfer.amount, 0);
-  }
+  const transferredAmount = transferredData
+    ? transferredData.reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
+    : 0;
 
-  // Calculate withdrawn amount from withdrawals table
-  const { data: withdrawnData } = await admin
-    .from("withdrawals")
-    .select("amount")
-    .eq("user_id", user.id)
-    .eq("status", "pending");
-
-  let withdrawnAmount = 0;
-  if (withdrawnData) {
-    withdrawnAmount = withdrawnData.reduce((sum, withdrawal) => sum + withdrawal.amount, 0);
-  }
-
-  // Available earnings = Total earnings - Already transferred - Already withdrawn
-  const availableEarnings = totalEarnings - transferredAmount - withdrawnAmount;
+  const availableEarnings = totalEarnings - transferredAmount;
 
   if (moveAmount > availableEarnings) {
-    return NextResponse.json({ error: "Insufficient available earnings" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Insufficient available earnings" },
+      { status: 400 }
+    );
   }
 
   try {
-    // Move amount from available earnings to wallet balance
     const currentWalletBalance = Number(profile.wallet_balance || 0);
     const newWalletBalance = currentWalletBalance + moveAmount;
-    
-    // Start a transaction to ensure atomicity
+
     const { error: walletError } = await admin
       .from("profiles")
       .update({ wallet_balance: newWalletBalance })
@@ -120,7 +80,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Failed to update wallet" }, { status: 500 });
     }
 
-    // Create a record of the transfer to track deducted earnings
     const { error: transferError } = await admin
       .from("earnings_to_wallet_transfers")
       .insert({
@@ -132,7 +91,6 @@ export async function POST(req: NextRequest) {
 
     if (transferError) {
       console.error("Transfer record error:", transferError);
-      // Rollback wallet update if transfer record fails
       await admin
         .from("profiles")
         .update({ wallet_balance: currentWalletBalance })
@@ -140,49 +98,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Failed to record transfer" }, { status: 500 });
     }
 
-    // Get user details for notification
     const { data: profileDetails } = await admin
       .from("profiles")
       .select("full_name, email, phone_number, store_name")
       .eq("id", user.id)
       .single();
 
-    // Send ntfy notification for wallet transfer
-    const ntfyMessage = `
-💰 WALLET TRANSFER - EARNINGS TO WALLET
-========================================
-
-📋 Transfer Details:
-Amount Transferred: GHS ${moveAmount.toFixed(2)}
-Previous Wallet Balance: GHS ${currentWalletBalance.toFixed(2)}
-New Wallet Balance: GHS ${newWalletBalance.toFixed(2)}
-
-👤 User Details:
-Name: ${profileDetails?.full_name || "N/A"}
-Email: ${profileDetails?.email || "N/A"}
-Phone: ${profileDetails?.phone_number || "N/A"}
-Store: ${profileDetails?.store_name || "N/A"}
-User ID: ${user.id}
-
-📊 Earnings Summary:
-Lifetime Earnings: GHS ${totalEarnings.toFixed(2)}
-Available Before: GHS ${availableEarnings.toFixed(2)}
-Available After: GHS ${(availableEarnings - moveAmount).toFixed(2)}
-
-⏰ Completed: ${new Date().toISOString()}
-    `.trim();
-
-    await sendNtfyNotification(
-      `💰 Wallet Transfer: GHS ${moveAmount.toFixed(2)} - ${profileDetails?.full_name || "Unknown"}`,
-      ntfyMessage
-    );
+    await notifyEarningsTransferredToWallet({
+      userId: user.id,
+      fullName: profileDetails?.full_name,
+      email: profileDetails?.email,
+      phoneNumber: profileDetails?.phone_number,
+      storeName: profileDetails?.store_name,
+      amountGhs: moveAmount,
+      previousWalletBalanceGhs: currentWalletBalance,
+      newWalletBalanceGhs: newWalletBalance,
+      lifetimeEarningsGhs: totalEarnings,
+      availableBeforeGhs: availableEarnings,
+      availableAfterGhs: availableEarnings - moveAmount,
+    });
 
     return NextResponse.json({
       success: true,
       message: `GHS ${moveAmount.toFixed(2)} moved to wallet balance successfully`,
-      newWalletBalance: newWalletBalance,
+      newWalletBalance,
     });
-
   } catch (error) {
     console.error("Move to wallet error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

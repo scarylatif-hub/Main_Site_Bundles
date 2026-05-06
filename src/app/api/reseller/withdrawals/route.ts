@@ -1,39 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-
-// ntfy configuration
-const NTFY_TOPIC = process.env.NTFY_TOPIC || "bundle-ghana";
-const NTFY_URL = `https://ntfy.sh/${NTFY_TOPIC}`;
-
-async function sendNtfyNotification(title: string, message: string) {
-  try {
-    console.log("[withdrawals] Sending ntfy notification to:", NTFY_URL);
-    console.log("[withdrawals] Title:", title);
-    console.log("[withdrawals] Message length:", message.length);
-    
-    const response = await fetch(NTFY_URL, {
-      method: "POST",
-      headers: {
-        "Title": title,
-        "Priority": "high",
-      },
-      body: message,
-    });
-    
-    if (!response.ok) {
-      console.error("[withdrawals] Ntfy response error:", response.status, response.statusText);
-    } else {
-      console.log("[withdrawals] Ntfy notification sent successfully");
-    }
-  } catch (error) {
-    console.error("[withdrawals] Failed to send ntfy notification:", error);
-  }
-}
+import { notifyWithdrawalRequested } from "@/lib/server/notifications";
+import { createClient } from "@/lib/supabase/server";
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -41,7 +15,6 @@ export async function POST(req: NextRequest) {
 
   const admin = createAdminClient();
 
-  // Get user profile
   const { data: profile } = await admin
     .from("profiles")
     .select("is_reseller, wallet_balance, full_name, email, phone_number")
@@ -55,60 +28,79 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const { amount, momoNumber, momoName } = body;
 
-  // Validate amount
   const withdrawalAmount = Number(amount);
   if (isNaN(withdrawalAmount) || withdrawalAmount < 0.01) {
-    return NextResponse.json({ error: "Minimum withdrawal amount is 0.01 GHS" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Minimum withdrawal amount is 0.01 GHS" },
+      { status: 400 }
+    );
   }
 
-  // Calculate total earnings from completed store orders
   const { data: profitData } = await admin
     .from("orders")
     .select("reseller_profit")
     .eq("store_id", user.id)
     .eq("status", "completed");
 
-  let totalEarnings = 0;
-  if (profitData) {
-    totalEarnings = profitData.reduce((sum, order) => sum + (order.reseller_profit || 0), 0);
-  }
+  const totalEarnings = profitData
+    ? profitData.reduce((sum, order) => sum + (order.reseller_profit || 0), 0)
+    : 0;
 
-  // Calculate already withdrawn amount
-  const { data: withdrawnData } = await admin
+  const { data: transferredData } = await admin
     .from("earnings_to_wallet_transfers")
     .select("amount")
     .eq("user_id", user.id)
     .eq("status", "completed")
+    .is("method", null);
+
+  const transferredAmount = transferredData
+    ? transferredData.reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
+    : 0;
+
+  const { data: pendingWithdrawalData } = await admin
+    .from("earnings_to_wallet_transfers")
+    .select("amount")
+    .eq("user_id", user.id)
+    .eq("status", "pending")
     .eq("method", "momo");
 
-  let withdrawnAmount = 0;
-  if (withdrawnData) {
-    withdrawnAmount = withdrawnData.reduce((sum, withdrawal) => sum + withdrawal.amount, 0);
-  }
+  const pendingWithdrawalAmount = pendingWithdrawalData
+    ? pendingWithdrawalData.reduce((sum, withdrawal) => sum + Number(withdrawal.amount || 0), 0)
+    : 0;
 
-  // Available earnings = Total earnings - Already withdrawn
-  const availableEarnings = totalEarnings - withdrawnAmount;
+  const availableEarnings =
+    totalEarnings - transferredAmount - pendingWithdrawalAmount;
 
   if (withdrawalAmount > availableEarnings) {
-    return NextResponse.json({ error: "Insufficient available earnings" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Insufficient available earnings" },
+      { status: 400 }
+    );
   }
 
-  // Validate Mobile Money details
   if (!momoNumber) {
-    return NextResponse.json({ error: "Mobile money number required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Mobile money number required" },
+      { status: 400 }
+    );
   }
 
   if (!momoName || momoName.trim().length < 2) {
-    return NextResponse.json({ error: "Mobile money name required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Mobile money name required" },
+      { status: 400 }
+    );
   }
 
   const phoneRegex = /^(0|233)\d{9}$/;
   if (!phoneRegex.test(momoNumber.replace(/\s/g, ""))) {
-    return NextResponse.json({ error: "Invalid Ghana phone number" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid Ghana phone number" },
+      { status: 400 }
+    );
   }
 
   try {
-    // Create withdrawal record
     const withdrawalReference = `WD${Date.now()}`;
     const { data: withdrawal, error: withdrawalError } = await admin
       .from("earnings_to_wallet_transfers")
@@ -128,72 +120,32 @@ export async function POST(req: NextRequest) {
 
     if (withdrawalError) {
       console.error("Withdrawal creation error:", withdrawalError);
-      return NextResponse.json({ error: "Failed to create withdrawal request" }, { status: 500 });
+      return NextResponse.json(
+        { error: "Failed to create withdrawal request" },
+        { status: 500 }
+      );
     }
 
-    // Send ntfy notification for manual processing
-    const ntfyMessage = `
-🚨 URGENT: MTN MOMO WITHDRAWAL REQUEST
-========================================
-
-� WITHDRAWAL DETAILS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Amount Requested: GHS ${withdrawalAmount.toFixed(2)}
-Reference ID: ${withdrawalReference}
-Withdrawal ID: ${withdrawal.id}
-Status: PENDING APPROVAL
-
-� MOBILE MONEY ACCOUNT
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Account Name: ${momoName.trim()}
-Phone Number: ${momoNumber}
-Network: MTN Mobile Money
-
-👤 SELLER INFORMATION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Store Owner: ${profile.full_name || "N/A"}
-Email: ${profile.email || "N/A"}
-Phone: ${profile.phone_number || "N/A"}
-User ID: ${user.id}
-
-📊 FINANCIAL SUMMARY
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Lifetime Earnings: GHS ${totalEarnings.toFixed(2)}
-Available Before: GHS ${availableEarnings.toFixed(2)}
-Amount Requested: GHS ${withdrawalAmount.toFixed(2)}
-Available After: GHS ${(availableEarnings - withdrawalAmount).toFixed(2)}
-
-⏰ REQUEST TIMELINE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Requested: ${new Date().toISOString()}
-Expected Processing: Within 24 hours
-
-🔴 IMMEDIATE ACTION REQUIRED
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-1. Verify seller identity and withdrawal amount
-2. Send GHS ${withdrawalAmount.toFixed(2)} to MTN MoMo: ${momoNumber}
-3. Mark withdrawal as COMPLETED in admin panel
-4. Confirm payment with seller via WhatsApp/Phone
-
-⚠️ IMPORTANT NOTES
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- This is a MANUAL withdrawal requiring immediate attention
-- Seller has sufficient earnings balance
-- Process within 24 hours to avoid delays
-- Keep payment proof for records
-    `.trim();
-
-    await sendNtfyNotification(
-      `� WITHDRAWAL: GHS ${withdrawalAmount.toFixed(2)} - ${momoName.trim()} - URGENT`,
-      ntfyMessage
-    );
+    await notifyWithdrawalRequested({
+      withdrawalId: withdrawal.id,
+      reference: withdrawalReference,
+      userId: user.id,
+      fullName: profile.full_name,
+      email: profile.email,
+      phoneNumber: profile.phone_number,
+      momoNumber,
+      momoName: momoName.trim(),
+      amountGhs: withdrawalAmount,
+      lifetimeEarningsGhs: totalEarnings,
+      availableBeforeGhs: availableEarnings,
+      availableAfterGhs: availableEarnings - withdrawalAmount,
+    });
 
     return NextResponse.json({
       success: true,
       withdrawal,
-      message: "Withdrawal request submitted successfully. Money will be sent manually."
+      message: "Withdrawal request submitted successfully. Money will be sent manually.",
     });
-
   } catch (error) {
     console.error("Withdrawal error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
@@ -202,7 +154,9 @@ Expected Processing: Within 24 hours
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -210,7 +164,6 @@ export async function GET(req: NextRequest) {
 
   const admin = createAdminClient();
 
-  // Get user profile
   const { data: profile } = await admin
     .from("profiles")
     .select("is_reseller")
@@ -221,7 +174,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Not a reseller" }, { status: 403 });
   }
 
-  // Get withdrawal history
   const { data: withdrawals, error } = await admin
     .from("earnings_to_wallet_transfers")
     .select("*")
@@ -231,7 +183,10 @@ export async function GET(req: NextRequest) {
 
   if (error) {
     console.error("Withdrawal history error:", error);
-    return NextResponse.json({ error: "Failed to fetch withdrawal history" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to fetch withdrawal history" },
+      { status: 500 }
+    );
   }
 
   return NextResponse.json({ withdrawals });

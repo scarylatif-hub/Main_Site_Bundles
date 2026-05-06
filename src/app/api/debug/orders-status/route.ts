@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
     const apiResult = await datakazinaAPI.fetchTransactions();
 
     result.stages["1_raw_api_call"] = {
-      ...result.stages["1_raw_api_call"],
+      ...(result.stages["1_raw_api_call"] as Record<string, unknown>),
       ok: apiResult.ok,
       status: apiResult.status,
       dataType: apiResult.data ? typeof apiResult.data : "null",

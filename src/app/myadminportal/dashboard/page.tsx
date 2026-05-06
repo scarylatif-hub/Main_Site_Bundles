@@ -1,9 +1,12 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { DashboardChart } from "./dashboard-chart";
 import { getRetailPriceMultiplier } from "@/lib/pricing";
 import {
   buildPhoneProfileMap,
   fetchExternalAllOrdersRaw,
   normalizeExternalOrder,
+  storeOrderToAdminRow,
+  transactionToAdminRow,
   type AdminOrderRow,
 } from "@/lib/external-all-orders";
 import {
@@ -14,8 +17,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-import { DashboardChart } from "./dashboard-chart";
-
 export const dynamic = "force-dynamic";
 
 export type SeriesPoint = {
@@ -24,7 +25,33 @@ export type SeriesPoint = {
   orders: number;
 };
 
-// ── helpers ────────────────────────────────────────────────────────────────
+type DbPurchaseRow = {
+  id: string;
+  user_id: string;
+  reference: string | null;
+  transaction_code: string | null;
+  created_at: string;
+  recipient_msisdn: string | null;
+  network_id: number | null;
+  bundle_amount: string | null;
+  status: string;
+  amount: number;
+  transaction_type: string | null;
+};
+
+type DbStoreOrderRow = {
+  id: string;
+  store_id: string;
+  package_id: number;
+  network_id: number;
+  phone_number: string;
+  amount: number;
+  status: string;
+  customer_email: string | null;
+  customer_phone: string | null;
+  created_at: string;
+  paystack_transaction_id: string | null;
+};
 
 function pad(n: number) {
   return String(n).padStart(2, "0");
@@ -60,35 +87,176 @@ function toSeries(map: Map<string, SeriesPoint>): SeriesPoint[] {
   return Array.from(map.values());
 }
 
-// ── page ───────────────────────────────────────────────────────────────────
+function rowKeys(row: AdminOrderRow): string[] {
+  return [
+    row.reference,
+    row.transaction_code,
+    row.provider_order_id,
+    row.id,
+  ]
+    .map((key) => (key != null ? String(key).trim() : ""))
+    .filter(Boolean);
+}
+
+function purchaseKeys(row: DbPurchaseRow): string[] {
+  return [row.reference, row.transaction_code, row.id]
+    .map((key) => (key != null ? String(key).trim() : ""))
+    .filter(Boolean);
+}
+
+function findMatchingExternalRow(
+  purchase: DbPurchaseRow,
+  externalRows: AdminOrderRow[]
+): AdminOrderRow | undefined {
+  const purchaseKeySet = new Set(purchaseKeys(purchase));
+  const exact = externalRows.find((row) =>
+    rowKeys(row).some((key) => purchaseKeySet.has(key))
+  );
+
+  if (exact) {
+    return exact;
+  }
+
+  const purchaseTime = new Date(purchase.created_at).getTime();
+  const purchasePhone = String(purchase.recipient_msisdn || "").trim();
+  const purchaseAmount = Math.abs(Number(purchase.amount || 0));
+
+  const candidates = externalRows.filter((row) => {
+    if (purchasePhone && row.recipient_msisdn && row.recipient_msisdn !== purchasePhone) {
+      return false;
+    }
+
+    if (
+      purchase.network_id != null &&
+      row.network_id != null &&
+      purchase.network_id !== row.network_id
+    ) {
+      return false;
+    }
+
+    return Math.abs(Math.abs(Number(row.amount || 0)) - purchaseAmount) <= 0.06;
+  });
+
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  candidates.sort((a, b) => {
+    const aDelta = Math.abs(new Date(a.created_at).getTime() - purchaseTime);
+    const bDelta = Math.abs(new Date(b.created_at).getTime() - purchaseTime);
+    return aDelta - bDelta;
+  });
+
+  return candidates[0];
+}
 
 export default async function MyAdminDashboardPage() {
   const admin = createAdminClient();
 
   const { data: profiles } = await admin
     .from("profiles")
-    .select("id,email,full_name,phone_number");
+    .select("id,email,full_name,phone_number,store_name");
 
   const totalUsers = profiles?.length ?? 0;
   const phoneMap = buildPhoneProfileMap(profiles || []);
+  const profileByUserId = new Map<string, { email: string; name: string }>();
+  const storeNameMap = new Map<string, string>();
 
-  const rawExternal = await fetchExternalAllOrdersRaw();
-  const rows: AdminOrderRow[] = [];
-  for (const raw of rawExternal) {
-    const row = normalizeExternalOrder(raw, phoneMap);
-    if (row) rows.push(row);
+  for (const profile of profiles || []) {
+    if (!profile.id) {
+      continue;
+    }
+
+    profileByUserId.set(profile.id, {
+      email: profile.email || "-",
+      name: profile.full_name || "",
+    });
+
+    if (profile.store_name) {
+      storeNameMap.set(profile.id, profile.store_name);
+    }
   }
 
-  // ── summary stats ──────────────────────────────────────────────────────
+  const rawExternal = await fetchExternalAllOrdersRaw();
+  const externalRows: AdminOrderRow[] = [];
+  for (const raw of rawExternal) {
+    const row = normalizeExternalOrder(raw, phoneMap);
+    if (row) {
+      externalRows.push(row);
+    }
+  }
 
-  const totalSales = rows.reduce((s, r) => s + Math.abs(Number(r.amount)), 0);
+  const { data: purchases } = await admin
+    .from("transactions")
+    .select(
+      "id,user_id,reference,transaction_code,created_at,recipient_msisdn,network_id,bundle_amount,status,amount,transaction_type"
+    )
+    .eq("transaction_type", "purchase")
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  const directRows: AdminOrderRow[] = [];
+  const matchedExternalKeys = new Set<string>();
+
+  for (const purchase of (purchases || []) as DbPurchaseRow[]) {
+    const directRow = transactionToAdminRow(purchase, profileByUserId);
+    const externalMatch = findMatchingExternalRow(purchase, externalRows);
+
+    if (externalMatch) {
+      directRow.reference = externalMatch.reference || directRow.reference;
+      directRow.provider_order_id = externalMatch.provider_order_id;
+      directRow.transaction_code =
+        externalMatch.transaction_code || directRow.transaction_code;
+      directRow.created_at = externalMatch.created_at || directRow.created_at;
+      directRow.recipient_msisdn =
+        externalMatch.recipient_msisdn || directRow.recipient_msisdn;
+      directRow.network_id = externalMatch.network_id ?? directRow.network_id;
+      directRow.network_label =
+        externalMatch.network_label ?? directRow.network_label;
+      directRow.bundle_amount =
+        externalMatch.bundle_amount || directRow.bundle_amount;
+      directRow.status = externalMatch.status || directRow.status;
+      directRow.amount = Math.abs(Number(externalMatch.amount || directRow.amount));
+
+      for (const key of rowKeys(externalMatch)) {
+        matchedExternalKeys.add(key);
+      }
+    }
+
+    directRows.push(directRow);
+  }
+
+  const { data: storeOrders } = await admin
+    .from("orders")
+    .select(
+      "id,store_id,package_id,network_id,phone_number,amount,status,customer_email,customer_phone,created_at,paystack_transaction_id"
+    )
+    .order("created_at", { ascending: false })
+    .limit(500);
+
+  const storeRows: AdminOrderRow[] = [];
+  for (const order of (storeOrders || []) as DbStoreOrderRow[]) {
+    const storeName = storeNameMap.get(order.store_id) || "Unknown Store";
+    storeRows.push(storeOrderToAdminRow(order, storeName, null));
+  }
+
+  const unmatchedExternalRows = externalRows.filter(
+    (row) => !rowKeys(row).some((key) => matchedExternalKeys.has(key))
+  );
+
+  const rows: AdminOrderRow[] = [
+    ...directRows,
+    ...storeRows,
+    ...unmatchedExternalRows,
+  ];
+
+  const totalSales = rows.reduce((sum, row) => sum + Math.abs(Number(row.amount)), 0);
+  const totalOrders = rows.length;
   const m = getRetailPriceMultiplier();
-  const totalProfit = rows.reduce((s, r) => {
-    const retail = Math.abs(Number(r.amount));
-    return s + retail * (1 - 1 / m);
+  const totalProfit = rows.reduce((sum, row) => {
+    const retail = Math.abs(Number(row.amount));
+    return sum + retail * (1 - 1 / m);
   }, 0);
-
-  // ── chart bucketing ────────────────────────────────────────────────────
 
   const now = new Date();
 
@@ -127,7 +295,10 @@ export default async function MyAdminDashboardPage() {
   }
 
   for (const row of rows) {
-    if (!row.created_at) continue;
+    if (!row.created_at) {
+      continue;
+    }
+
     const d = new Date(row.created_at);
     const amt = Math.abs(Number(row.amount));
 
@@ -138,17 +309,29 @@ export default async function MyAdminDashboardPage() {
 
     if (isToday) {
       const slot = dailyMap.get(fmtHour(d));
-      if (slot) { slot.revenue += amt; slot.orders += 1; }
+      if (slot) {
+        slot.revenue += amt;
+        slot.orders += 1;
+      }
     }
 
     const dSlot = monthlyMap.get(fmtDay(d));
-    if (dSlot) { dSlot.revenue += amt; dSlot.orders += 1; }
+    if (dSlot) {
+      dSlot.revenue += amt;
+      dSlot.orders += 1;
+    }
 
     const wSlot = weeklyMap.get(weekLabel(d));
-    if (wSlot) { wSlot.revenue += amt; wSlot.orders += 1; }
+    if (wSlot) {
+      wSlot.revenue += amt;
+      wSlot.orders += 1;
+    }
 
     const ySlot = yearlyMap.get(fmtMonth(d));
-    if (ySlot) { ySlot.revenue += amt; ySlot.orders += 1; }
+    if (ySlot) {
+      ySlot.revenue += amt;
+      ySlot.orders += 1;
+    }
   }
 
   return (
@@ -156,11 +339,11 @@ export default async function MyAdminDashboardPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Overview of users, sales, and estimated profit (after wholesale cost).
+          Overview of users, sales, and estimated profit across main site and store orders.
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Total users</CardDescription>
@@ -173,13 +356,23 @@ export default async function MyAdminDashboardPage() {
 
         <Card>
           <CardHeader className="pb-2">
+            <CardDescription>Total orders</CardDescription>
+            <CardTitle className="text-3xl tabular-nums">{totalOrders}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">
+            Direct, store, and provider-only fallback rows
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
             <CardDescription>Total sales</CardDescription>
             <CardTitle className="text-3xl tabular-nums text-green-600">
               GHS {totalSales.toFixed(2)}
             </CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">
-            All orders from provider (customer prices)
+            Main site and store orders combined
           </CardContent>
         </Card>
 
@@ -191,7 +384,7 @@ export default async function MyAdminDashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">
-            Based on your retail multiplier ({m.toFixed(4)}×) vs wholesale
+            Estimated from all orders using retail multiplier ({m.toFixed(4)}x)
           </CardContent>
         </Card>
       </div>

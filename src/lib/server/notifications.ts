@@ -1,7 +1,7 @@
 // src/lib/server/notifications.ts
 
-import { createAdminClient } from "@/lib/supabase/admin";
 import { normalizeOrderStatus } from "@/lib/order-status";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 function ntfyTopic(): string {
@@ -12,7 +12,6 @@ function ntfyBaseUrl(): string {
   return (process.env.NTFY_URL || "https://ntfy.sh").replace(/\/$/, "");
 }
 
-/** Safely format a number to 2dp — never crashes on undefined/null/NaN */
 function safeFormatPrice(amount: unknown): string {
   const n = Number(amount);
   return Number.isFinite(n) ? n.toFixed(2) : "0.00";
@@ -25,32 +24,48 @@ async function ntfyPost(
   tags: string
 ): Promise<boolean> {
   const url = `${ntfyBaseUrl()}/${encodeURIComponent(topic)}`;
+
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "text/plain",
-        "Title": title,
-        "Priority": "high",
-        "Tags": tags,
+        Title: title,
+        Priority: "high",
+        Tags: tags,
       },
       body: message,
     });
 
     if (!res.ok) {
-      const t = await res.text().catch(() => "");
-      console.error(`ntfy error [${res.status}] ${url}:`, t.slice(0, 300));
-    } else {
-      // Removed notification logging to prevent exposing sensitive data in console
+      const text = await res.text().catch(() => "");
+      console.error(`ntfy error [${res.status}] ${url}:`, text.slice(0, 300));
     }
+
     return res.ok;
-  } catch (e) {
-    console.error("ntfy fetch failed:", e);
+  } catch (error) {
+    console.error("ntfy fetch failed:", error);
     return false;
   }
 }
 
-// ── Public notification helpers ───────────────────────────────────────────────
+export async function sendNtfyNotification(params: {
+  title: string;
+  message: string;
+  tags?: string;
+  topic?: string;
+}): Promise<boolean> {
+  if (process.env.NTFY_DISABLE === "1" || process.env.NTFY_DISABLE === "true") {
+    return true;
+  }
+
+  return ntfyPost(
+    params.topic || ntfyTopic(),
+    params.title,
+    params.message,
+    params.tags || "bell"
+  );
+}
 
 export async function sendAdminOrderNotification(orderData: {
   orderId: string;
@@ -59,13 +74,8 @@ export async function sendAdminOrderNotification(orderData: {
   product: string;
   phoneNumber?: string;
 }): Promise<boolean> {
-  if (process.env.NTFY_DISABLE === "1" || process.env.NTFY_DISABLE === "true") {
-    return true;
-  }
-
-  const topic = ntfyTopic();
   const isDeposit = orderData.product === "Wallet Deposit";
-  const priceStr = safeFormatPrice(orderData.amount); // ← safe, never crashes
+  const priceStr = safeFormatPrice(orderData.amount);
 
   const title = isDeposit
     ? `New Wallet Deposit: GHS ${priceStr}`
@@ -80,9 +90,11 @@ export async function sendAdminOrderNotification(orderData: {
     `Phone: ${orderData.phoneNumber || "N/A"}`,
   ].join("\n");
 
-  const tags = isDeposit ? "dollar,arrow_down" : "moneybag,shopping_cart";
-
-  return ntfyPost(topic, title, message, tags);
+  return sendNtfyNotification({
+    title,
+    message,
+    tags: isDeposit ? "dollar,arrow_down" : "moneybag,shopping_cart",
+  });
 }
 
 export async function sendAdminDeliveryNotification(orderData: {
@@ -91,59 +103,51 @@ export async function sendAdminDeliveryNotification(orderData: {
   product: string;
   beneficiary: string;
 }): Promise<boolean> {
-  if (process.env.NTFY_DISABLE === "1" || process.env.NTFY_DISABLE === "true") {
-    return true;
-  }
-
-  const topic = ntfyTopic();
-  const title = `✅ Delivered: ${orderData.product}`;
+  const title = `Delivered: ${orderData.product}`;
   const message = [
-    "📦 Bundle delivered!",
+    "📦 Bundle delivered",
     `Customer: ${orderData.customerName}`,
     `Product: ${orderData.product}`,
     `To: ${orderData.beneficiary}`,
     `ID: ${orderData.orderId}`,
   ].join("\n");
-  const tags = "white_check_mark,package";
 
-  return ntfyPost(topic, title, message, tags);
+  return sendNtfyNotification({
+    title,
+    message,
+    tags: "white_check_mark,package",
+  });
 }
 
-/**
- * Called after wallet credit succeeds (first time only).
- * Fixed: was passing `creditAmountGhs` but function expected `amountGhs` — now unified.
- */
 export async function notifyAdminWalletDepositCredited(params: {
   userId: string;
   reference: string;
-  amountGhs: number;         // ← consistent name, matches all call sites
-  creditAmountGhs?: number;  // ← accepts legacy callers that pass this instead
+  amountGhs: number;
+  creditAmountGhs?: number;
 }): Promise<void> {
   try {
-    // Resolve amount from whichever field the caller provided
     const amount = Number(params.amountGhs ?? params.creditAmountGhs ?? 0);
-
     const admin = createAdminClient();
-    const { data: p } = await admin
+    const { data: profile } = await admin
       .from("profiles")
       .select("full_name, email, phone_number")
       .eq("id", params.userId)
       .maybeSingle();
 
     const customerName =
-      (p?.full_name && String(p.full_name).trim()) ||
-      (p?.email && String(p.email).trim()) ||
+      (profile?.full_name && String(profile.full_name).trim()) ||
+      (profile?.email && String(profile.email).trim()) ||
       "Customer";
 
     await sendAdminOrderNotification({
       orderId: params.reference,
       customerName,
-      amount,                  // ← always a real number now
+      amount,
       product: "Wallet Deposit",
-      phoneNumber: p?.phone_number ? String(p.phone_number) : undefined,
+      phoneNumber: profile?.phone_number ? String(profile.phone_number) : undefined,
     });
-  } catch (e) {
-    console.error("notifyAdminWalletDepositCredited:", e);
+  } catch (error) {
+    console.error("notifyAdminWalletDepositCredited:", error);
   }
 }
 
@@ -157,32 +161,183 @@ export async function notifyAdminBundlePurchase(params: {
 }): Promise<void> {
   try {
     const admin = createAdminClient();
-    const { data: p } = await admin
+    const { data: profile } = await admin
       .from("profiles")
       .select("full_name, email")
       .eq("id", params.userId)
       .maybeSingle();
 
     const customerName =
-      (p?.full_name && String(p.full_name).trim()) ||
-      (p?.email && String(p.email).trim()) ||
+      (profile?.full_name && String(profile.full_name).trim()) ||
+      (profile?.email && String(profile.email).trim()) ||
       "Customer";
-
-    const product = `${params.dataAmount} (net ${params.networkId})`;
 
     await sendAdminOrderNotification({
       orderId: params.orderId,
       customerName,
       amount: params.amountGhs,
-      product,
+      product: `${params.dataAmount} (net ${params.networkId})`,
       phoneNumber: params.recipientMsisdn,
     });
-  } catch (e) {
-    console.error("notifyAdminBundlePurchase:", e);
+  } catch (error) {
+    console.error("notifyAdminBundlePurchase:", error);
   }
 }
 
-// ── Delivery notification helpers ─────────────────────────────────────────────
+export async function notifyStoreCreationRequested(params: {
+  userId: string;
+  storeName: string;
+  storeSlug: string;
+  resellerName?: string | null;
+  email?: string | null;
+  phoneNumber?: string | null;
+}): Promise<boolean> {
+  const storeDomain = process.env.NEXT_PUBLIC_STORE_DOMAIN || "bundles-store.vercel.app";
+
+  return sendNtfyNotification({
+    title: `Store Created: ${params.storeName}`,
+    message: [
+      "🏪 New store creation request",
+      `Store: ${params.storeName}`,
+      `Slug: ${params.storeSlug}`,
+      `URL: https://${storeDomain}/store/${params.storeSlug}`,
+      `Owner: ${params.resellerName || "N/A"}`,
+      `Email: ${params.email || "N/A"}`,
+      `Phone: ${params.phoneNumber || "N/A"}`,
+      `User ID: ${params.userId}`,
+      "Status: Pending approval",
+      "Default profit margin: 5%",
+      `Created: ${new Date().toISOString()}`,
+    ].join("\n"),
+    tags: "store,shopping_cart,new",
+  });
+}
+
+export async function notifyStoreOrderCompleted(params: {
+  storeId: string;
+  orderId: string;
+  customerPhone: string;
+  packageLabel: string;
+  amountGhs: number;
+  transactionCode: string;
+  storeProfitGhs: number;
+}): Promise<boolean> {
+  return sendNtfyNotification({
+    title: `Store Order: GHS ${safeFormatPrice(params.amountGhs)}`,
+    message: [
+      "🛒 Store order completed",
+      `Store ID: ${params.storeId}`,
+      `Order ID: ${params.orderId}`,
+      `Customer Phone: ${params.customerPhone}`,
+      `Package: ${params.packageLabel}`,
+      `Amount Paid: GHS ${safeFormatPrice(params.amountGhs)}`,
+      `Store Profit: GHS ${safeFormatPrice(params.storeProfitGhs)}`,
+      `Transaction Code: ${params.transactionCode}`,
+      `Completed: ${new Date().toISOString()}`,
+    ].join("\n"),
+    tags: "shopping_cart,white_check_mark,moneybag",
+  });
+}
+
+export async function notifyEarningsTransferredToWallet(params: {
+  userId: string;
+  fullName?: string | null;
+  email?: string | null;
+  phoneNumber?: string | null;
+  storeName?: string | null;
+  amountGhs: number;
+  previousWalletBalanceGhs: number;
+  newWalletBalanceGhs: number;
+  lifetimeEarningsGhs: number;
+  availableBeforeGhs: number;
+  availableAfterGhs: number;
+}): Promise<boolean> {
+  return sendNtfyNotification({
+    title: `Earnings Transfer: GHS ${safeFormatPrice(params.amountGhs)}`,
+    message: [
+      "💰 Earnings moved to wallet",
+      `Amount: GHS ${safeFormatPrice(params.amountGhs)}`,
+      `Wallet Before: GHS ${safeFormatPrice(params.previousWalletBalanceGhs)}`,
+      `Wallet After: GHS ${safeFormatPrice(params.newWalletBalanceGhs)}`,
+      `Owner: ${params.fullName || "N/A"}`,
+      `Store: ${params.storeName || "N/A"}`,
+      `Email: ${params.email || "N/A"}`,
+      `Phone: ${params.phoneNumber || "N/A"}`,
+      `User ID: ${params.userId}`,
+      `Lifetime Earnings: GHS ${safeFormatPrice(params.lifetimeEarningsGhs)}`,
+      `Available Before: GHS ${safeFormatPrice(params.availableBeforeGhs)}`,
+      `Available After: GHS ${safeFormatPrice(params.availableAfterGhs)}`,
+      `Completed: ${new Date().toISOString()}`,
+    ].join("\n"),
+    tags: "moneybag,arrow_right,bank",
+  });
+}
+
+export async function notifyWithdrawalRequested(params: {
+  withdrawalId: string;
+  reference: string;
+  userId: string;
+  fullName?: string | null;
+  email?: string | null;
+  phoneNumber?: string | null;
+  momoNumber: string;
+  momoName: string;
+  amountGhs: number;
+  lifetimeEarningsGhs: number;
+  availableBeforeGhs: number;
+  availableAfterGhs: number;
+}): Promise<boolean> {
+  return sendNtfyNotification({
+    title: `Withdrawal Request: GHS ${safeFormatPrice(params.amountGhs)}`,
+    message: [
+      "🚨 Withdrawal request submitted",
+      `Amount: GHS ${safeFormatPrice(params.amountGhs)}`,
+      `Reference: ${params.reference}`,
+      `Withdrawal ID: ${params.withdrawalId}`,
+      `MoMo Name: ${params.momoName}`,
+      `MoMo Number: ${params.momoNumber}`,
+      `Owner: ${params.fullName || "N/A"}`,
+      `Email: ${params.email || "N/A"}`,
+      `Phone: ${params.phoneNumber || "N/A"}`,
+      `User ID: ${params.userId}`,
+      `Lifetime Earnings: GHS ${safeFormatPrice(params.lifetimeEarningsGhs)}`,
+      `Available Before: GHS ${safeFormatPrice(params.availableBeforeGhs)}`,
+      `Available After: GHS ${safeFormatPrice(params.availableAfterGhs)}`,
+      `Requested: ${new Date().toISOString()}`,
+    ].join("\n"),
+    tags: "warning,money_with_wings,iphone",
+  });
+}
+
+export async function notifyWithdrawalCompleted(params: {
+  withdrawalId: string;
+  reference?: string | null;
+  amountGhs: number;
+  fullName?: string | null;
+  email?: string | null;
+  phoneNumber?: string | null;
+  momoNumber?: string | null;
+  momoName?: string | null;
+  method?: string | null;
+}): Promise<boolean> {
+  return sendNtfyNotification({
+    title: `Withdrawal Completed: GHS ${safeFormatPrice(params.amountGhs)}`,
+    message: [
+      "✅ Withdrawal completed",
+      `Withdrawal ID: ${params.withdrawalId}`,
+      `Amount: GHS ${safeFormatPrice(params.amountGhs)}`,
+      `Reference: ${params.reference || "N/A"}`,
+      `Owner: ${params.fullName || "N/A"}`,
+      `Email: ${params.email || "N/A"}`,
+      `Phone: ${params.phoneNumber || "N/A"}`,
+      `MoMo Name: ${params.momoName || "N/A"}`,
+      `MoMo Number: ${params.momoNumber || "N/A"}`,
+      `Method: ${params.method || "N/A"}`,
+      `Completed: ${new Date().toISOString()}`,
+    ].join("\n"),
+    tags: "white_check_mark,moneybag,bank",
+  });
+}
 
 function looksLikeUuid(s: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -199,40 +354,47 @@ export async function loadPurchaseRowForDeliveryNotify(
   user_id: string;
 } | null> {
   const key = transactionLookupKey.trim();
-  if (!key) return null;
+  if (!key) {
+    return null;
+  }
 
   const sel = "bundle_amount, recipient_msisdn, user_id";
 
-  const { data: d1 } = await admin
+  const { data: byReference } = await admin
     .from("transactions")
     .select(sel)
     .eq("reference", key)
     .eq("transaction_type", "purchase")
     .maybeSingle();
-  if (d1) return d1;
+  if (byReference) {
+    return byReference;
+  }
 
-  const { data: d2 } = await admin
+  const { data: byCode } = await admin
     .from("transactions")
     .select(sel)
     .eq("transaction_code", key)
     .eq("transaction_type", "purchase")
     .maybeSingle();
-  if (d2) return d2;
+  if (byCode) {
+    return byCode;
+  }
 
   if (looksLikeUuid(key)) {
-    const { data: d3 } = await admin
+    const { data: byId } = await admin
       .from("transactions")
       .select(sel)
       .eq("id", key)
       .eq("transaction_type", "purchase")
       .maybeSingle();
-    if (d3) return d3;
+    if (byId) {
+      return byId;
+    }
   }
 
   return null;
 }
 
-/** Call when admin sets status to delivered and it was not delivered before. */
 export async function notifyAdminOrderDeliveredIfNeeded(params: {
   admin: SupabaseClient;
   transaction_id: string;
@@ -240,37 +402,44 @@ export async function notifyAdminOrderDeliveredIfNeeded(params: {
   newStatus: string;
 }): Promise<void> {
   const next = normalizeOrderStatus(params.newStatus);
-  if (next !== "delivered") return;
+  if (next !== "delivered") {
+    return;
+  }
+
   const prev = params.previousStatus
     ? normalizeOrderStatus(params.previousStatus)
     : "";
-  if (prev === "delivered") return;
+  if (prev === "delivered") {
+    return;
+  }
 
   try {
     const tx = await loadPurchaseRowForDeliveryNotify(
       params.admin,
       params.transaction_id
     );
-    if (!tx?.user_id) return;
+    if (!tx?.user_id) {
+      return;
+    }
 
-    const { data: p } = await params.admin
+    const { data: profile } = await params.admin
       .from("profiles")
       .select("full_name, email")
       .eq("id", tx.user_id)
       .maybeSingle();
 
     const customerName =
-      (p?.full_name && String(p.full_name).trim()) ||
-      (p?.email && String(p.email).trim()) ||
+      (profile?.full_name && String(profile.full_name).trim()) ||
+      (profile?.email && String(profile.email).trim()) ||
       "Customer";
 
     await sendAdminDeliveryNotification({
       orderId: params.transaction_id,
       customerName,
       product: tx.bundle_amount || "Data bundle",
-      beneficiary: tx.recipient_msisdn || "—",
+      beneficiary: tx.recipient_msisdn || "-",
     });
-  } catch (e) {
-    console.error("notifyAdminOrderDeliveredIfNeeded:", e);
+  } catch (error) {
+    console.error("notifyAdminOrderDeliveredIfNeeded:", error);
   }
 }
