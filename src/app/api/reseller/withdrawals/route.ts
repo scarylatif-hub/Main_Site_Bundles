@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notifyWithdrawalRequested } from "@/lib/server/notifications";
 import { createClient } from "@/lib/supabase/server";
+import { computeResellerEarningsSummary } from "@/lib/reseller-earnings";
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
@@ -36,40 +37,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { data: profitData } = await admin
-    .from("orders")
-    .select("reseller_profit")
-    .eq("store_id", user.id)
-    .eq("status", "completed");
-
-  const totalEarnings = profitData
-    ? profitData.reduce((sum, order) => sum + (order.reseller_profit || 0), 0)
-    : 0;
-
-  const { data: transferredData } = await admin
-    .from("earnings_to_wallet_transfers")
-    .select("amount")
-    .eq("user_id", user.id)
-    .eq("status", "completed")
-    .is("method", null);
-
-  const transferredAmount = transferredData
-    ? transferredData.reduce((sum, transfer) => sum + Number(transfer.amount || 0), 0)
-    : 0;
-
-  const { data: pendingWithdrawalData } = await admin
-    .from("earnings_to_wallet_transfers")
-    .select("amount")
-    .eq("user_id", user.id)
-    .eq("status", "pending")
-    .eq("method", "momo");
-
-  const pendingWithdrawalAmount = pendingWithdrawalData
-    ? pendingWithdrawalData.reduce((sum, withdrawal) => sum + Number(withdrawal.amount || 0), 0)
-    : 0;
-
-  const availableEarnings =
-    totalEarnings - transferredAmount - pendingWithdrawalAmount;
+  const earnings = await computeResellerEarningsSummary(admin, user.id);
+  const totalEarnings = earnings.lifetimeEarnings;
+  const availableEarnings = earnings.availableEarnings;
 
   if (withdrawalAmount > availableEarnings) {
     return NextResponse.json(

@@ -21,25 +21,8 @@ import { datakazinaAPI }              from "@/lib/datakazina";
 import { retryWithBackoff }           from "@/lib/server/retry";
 import { normalizePhoneNumber }       from "@/lib/networks";
 import { displayNetworkIdToDatakazina } from "@/lib/network-id-map";
-
-// ntfy configuration
-const NTFY_TOPIC = process.env.NTFY_TOPIC || "bundle-ghana";
-const NTFY_URL = `https://ntfy.sh/${NTFY_TOPIC}`;
-
-async function sendNtfyNotification(title: string, message: string) {
-  try {
-    await fetch(NTFY_URL, {
-      method: "POST",
-      headers: {
-        "Title": title,
-        "Priority": "high",
-      },
-      body: message,
-    });
-  } catch (error) {
-    console.error("[guest/orders] Failed to send ntfy notification:", error);
-  }
-}
+import { computeResellerProfitGhs } from "@/lib/reseller-earnings";
+import { sendNtfyNotification } from "@/lib/server/notifications";
 
 // ── Paystack verification ─────────────────────────────────────────────────────
 
@@ -125,7 +108,7 @@ export async function POST(req: NextRequest) {
   // 4. Validate store
   const { data: storeOwner, error: storeErr } = await admin
     .from("profiles")
-    .select("id, is_reseller, reseller_approved, store_active, wallet_balance, profit_margin")
+    .select("id, is_reseller, reseller_approved, store_active, wallet_balance, profit_margin, store_name, reseller_slug")
     .eq("id", store_id)
     .single();
 
@@ -156,6 +139,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid phone number" }, { status: 400 });
   }
 
+  // Pre-compute reseller profit so earnings can accrue immediately after paid order creation.
+  const upfrontResellerProfit = computeResellerProfitGhs({
+    amount,
+    consolePrice: pkg.console_price ?? pkg.price ?? 0,
+  });
+
   // 7. Insert order in "processing" — acts as second idempotency anchor
   const { data: newOrder, error: insertErr } = await admin
     .from("orders")
@@ -170,6 +159,7 @@ export async function POST(req: NextRequest) {
       customer_email:    email ?? null,
       customer_phone:    recipient_msisdn,
       payment_reference,
+      reseller_profit:    upfrontResellerProfit,
       created_at:        new Date().toISOString(),
     })
     .select("id")
@@ -244,17 +234,16 @@ export async function POST(req: NextRequest) {
   // Removed success logging to prevent exposing transaction codes
 
   // Calculate reseller profit before updating order
-  const adminMarkup    = 0.14;
-  const consolePrice   = Number(pkg.console_price ?? pkg.price ?? 0);
-  const resellerCost   = consolePrice * (1 + adminMarkup);
-  const resellerProfit = Number(amount) - resellerCost;
+  const consolePrice = Number(pkg.console_price ?? pkg.price ?? 0);
+  const resellerProfit = upfrontResellerProfit;
+  const resellerCost = consolePrice * 1.14;
 
   // Removed profit calculation logging to prevent exposing financial data
 
   await admin
     .from("orders")
     .update({
-      status:                   "completed",
+      status:                   "delivered",
       paystack_transaction_id:  providerCode,
       error_message:            null,
       reseller_profit:          resellerProfit > 0 ? resellerProfit : 0,
@@ -283,29 +272,34 @@ export async function POST(req: NextRequest) {
       profit_margin: Number(profitMargin),
     });
 
-  // Send ntfy notification for successful store order
-  const ntfyMessage = `
-🛒 STORE ORDER COMPLETED
-========================================
+  const buyerLabel =
+    String(email || "").trim() || "Guest customer (unknown name)";
+  const storeLabel =
+    String(storeOwner.store_name || "").trim() || "Unnamed store";
+  const storeSlug = String(storeOwner.reseller_slug || "").trim();
+  const storeUrl = storeSlug
+    ? `https://${process.env.NEXT_PUBLIC_STORE_DOMAIN || "bundles-store.vercel.app"}/store/${storeSlug}`
+    : "N/A";
 
-📋 Order Details:
-Store ID: ${store_id}
-Customer Phone: ${recipient_msisdn}
-Package: ${pkg.volume || pkg.shared_bundle}GB
-Amount Paid: GHS ${Number(amount).toFixed(2)}
-Transaction Code: ${providerCode}
-
-👤 Store Owner:
-User ID: ${storeOwner.id}
-Store Profit: GHS ${resellerProfit > 0 ? resellerProfit.toFixed(2) : '0.00'}
-
-⏰ Completed: ${new Date().toISOString()}
-  `.trim();
-
-  await sendNtfyNotification(
-    `🛒 Store Order: GHS ${Number(amount).toFixed(2)} - Store ${store_id}`,
-    ntfyMessage
-  );
+  await sendNtfyNotification({
+    title: `Store Order: GHS ${Number(amount).toFixed(2)}`,
+    message: [
+      "🛒 STORE ORDER COMPLETED",
+      `Store: ${storeLabel}`,
+      `Store URL: ${storeUrl}`,
+      `Store ID: ${store_id}`,
+      `Order ID: ${newOrder.id}`,
+      `Payment Ref: ${payment_reference}`,
+      `Provider Ref: ${providerCode}`,
+      `Buyer: ${buyerLabel}`,
+      `Recipient Phone: ${recipient_msisdn}`,
+      `Package: ${pkg.volume || pkg.shared_bundle}GB`,
+      `Amount Paid: GHS ${Number(amount).toFixed(2)}`,
+      `Store Profit: GHS ${resellerProfit > 0 ? resellerProfit.toFixed(2) : "0.00"}`,
+      `Completed: ${new Date().toISOString()}`,
+    ].join("\n"),
+    tags: "shopping_cart,moneybag,iphone",
+  });
 
   return NextResponse.json({
     success:          true,

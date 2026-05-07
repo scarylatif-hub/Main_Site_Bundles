@@ -1,15 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 import { notifyWithdrawalCompleted } from "@/lib/server/notifications";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const admin = createAdminClient();
   const { id: withdrawalId } = await params;
 
   try {
+    const { data: actingProfile } = await admin
+      .from("profiles")
+      .select("is_admin")
+      .eq("id", user.id)
+      .single();
+
+    if (!actingProfile?.is_admin) {
+      return NextResponse.json({ error: "Not an admin" }, { status: 403 });
+    }
+
     const { data: withdrawal, error: fetchError } = await admin
       .from("earnings_to_wallet_transfers")
       .select("*")
@@ -32,7 +52,9 @@ export async function POST(
       .from("earnings_to_wallet_transfers")
       .update({
         status: "completed",
-        completed_at: completedAt,
+        // Keep this aligned with the PATCH endpoint columns.
+        processed_at: completedAt,
+        processed_by: user.id,
       })
       .eq("id", withdrawalId);
 
@@ -50,17 +72,21 @@ export async function POST(
       .eq("id", withdrawal.user_id)
       .single();
 
-    await notifyWithdrawalCompleted({
-      withdrawalId,
-      reference: withdrawal.reference,
-      amountGhs: Number(withdrawal.amount || 0),
-      fullName: profile?.full_name,
-      email: profile?.email,
-      phoneNumber: profile?.phone_number,
-      momoNumber: withdrawal.momo_number,
-      momoName: withdrawal.momo_name,
-      method: withdrawal.method,
-    });
+    try {
+      await notifyWithdrawalCompleted({
+        withdrawalId,
+        reference: withdrawal.reference,
+        amountGhs: Number(withdrawal.amount || 0),
+        fullName: profile?.full_name,
+        email: profile?.email,
+        phoneNumber: profile?.phone_number,
+        momoNumber: withdrawal.momo_number,
+        momoName: withdrawal.momo_name,
+        method: withdrawal.method,
+      });
+    } catch (notifyError) {
+      console.error("Withdrawal completion notify failed:", notifyError);
+    }
 
     return NextResponse.json({
       success: true,
@@ -68,7 +94,7 @@ export async function POST(
       withdrawal: {
         ...withdrawal,
         status: "completed",
-        completed_at: completedAt,
+        processed_at: completedAt,
       },
     });
   } catch (error) {

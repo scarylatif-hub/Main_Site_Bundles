@@ -81,35 +81,30 @@ export async function fetchMyPurchaseTransactionsForUser(
   const rows = (data ?? []) as Transaction[];
   const purchases = rows.filter(isPurchaseRow);
 
-  let externalRows: AdminOrderRow[] = [];
   const overrides: Record<string, string> = {};
 
   try {
     const admin = createAdminClient();
-    const [{ data: profiles }, { data: ovRows }, rawExternal] = await Promise.all([
-      admin.from("profiles").select("id,email,full_name,phone_number"),
-      admin.from("provider_order_overrides").select("transaction_id,status"),
-      fetchExternalAllOrdersRaw(),
-    ]);
-
-    const phoneMap = buildPhoneProfileMap(profiles || []);
-    for (const raw of rawExternal) {
-      const row = normalizeExternalOrder(raw, phoneMap);
-      if (row) externalRows.push(row);
-    }
+    const { data: ovRows } = await admin
+      .from("provider_order_overrides")
+      .select("transaction_id,status");
 
     for (const row of ovRows ?? []) {
       const id = row.transaction_id as string | undefined;
       if (id) overrides[id] = String(row.status);
     }
   } catch (error) {
-    console.error("fetchMyPurchaseTransactionsForUser: external/overrides", error);
+    console.error("fetchMyPurchaseTransactionsForUser: overrides", error);
   }
 
-  return purchases.map((transaction) => ({
-    ...transaction,
-    status: resolveStatusLikeAdmin(transaction, externalRows, overrides),
-  }));
+  // Status resolution: admin override → database status (no live API calls)
+  return purchases.map((transaction) => {
+    const overrideKey = transactionLookupKeys(transaction)[0];
+    return {
+      ...transaction,
+      status: overrides[overrideKey] ?? transaction.status,
+    };
+  });
 }
 
 export async function fetchMyPurchaseTransactions(): Promise<Transaction[]> {

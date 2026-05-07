@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { normalizeStatusForEarnings } from "@/lib/reseller-earnings";
 
 export const dynamic = "force-dynamic";
 
 function normalizeWebhookStatus(raw: unknown): string {
-  return String(raw ?? "").trim().toLowerCase();
+  return normalizeStatusForEarnings(raw);
 }
 
 function collectWebhookReferences(body: Record<string, unknown>): string[] {
@@ -31,6 +32,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // Dakazina sends test events from dashboard; acknowledge but do not mutate data.
+  if (body.test === true) {
+    return NextResponse.json({ ok: true, skipped: "test_event" });
+  }
+
   const referenceCandidates = collectWebhookReferences(body);
   if (referenceCandidates.length === 0) {
     console.error("Dakazina webhook: Missing reference/order_code", body);
@@ -38,6 +44,7 @@ export async function POST(req: NextRequest) {
   }
 
   const status = normalizeWebhookStatus(body.status);
+  const previousStatus = normalizeWebhookStatus(body.previous_status);
   if (!status) {
     console.error("Dakazina webhook: Missing status", body);
     return NextResponse.json({ error: "Missing status" }, { status: 400 });
@@ -48,6 +55,7 @@ export async function POST(req: NextRequest) {
   console.log("Dakazina webhook received:", {
     references: referenceCandidates,
     status,
+    previous_status: previousStatus,
     order_code: body.order_code,
     type: body.type,
     test: body.test,
@@ -143,6 +151,32 @@ export async function POST(req: NextRequest) {
   const orderIds = [...new Set((orderMatches || []).map((row) => row.id))];
   let ordersUpdated = 0;
 
+  // Fallback: some Dakazina payloads use provider-only IDs that don't map to our stored refs.
+  // In that case, try a conservative heuristic by amount + recent created_at + in-flight statuses.
+  if (orderIds.length === 0 && body.amount != null) {
+    const occurredAt = body.occurred_at ? new Date(String(body.occurred_at)) : new Date();
+    const lowerBound = new Date(occurredAt.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const upperBound = new Date(occurredAt.getTime() + 2 * 60 * 60 * 1000).toISOString();
+    const amount = Number(body.amount);
+
+    const { data: heuristicOrders, error: heuristicError } = await admin
+      .from("orders")
+      .select("id, amount, status, created_at")
+      .in("status", ["pending", "processing", "placed"])
+      .gte("created_at", lowerBound)
+      .lte("created_at", upperBound)
+      .eq("amount", amount)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (heuristicError) {
+      console.error("Dakazina webhook: Heuristic order lookup failed", heuristicError);
+    } else if ((heuristicOrders?.length || 0) === 1) {
+      orderIds.push(heuristicOrders![0].id);
+      console.log("Dakazina webhook: Heuristic matched order", heuristicOrders![0].id);
+    }
+  }
+
   if (orderIds.length > 0) {
     const { data: updatedOrders, error: orderUpdateError } = await admin
       .from("orders")
@@ -162,6 +196,7 @@ export async function POST(req: NextRequest) {
     ok: true,
     references: referenceCandidates,
     status,
+    previous_status: previousStatus,
     transactions_updated: transactionsUpdated,
     orders_updated: ordersUpdated,
     webhook_id: body.id,

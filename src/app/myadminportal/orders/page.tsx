@@ -141,36 +141,25 @@ export default async function MyAdminOrdersPage() {
     const bundleAmount = packageMap.get(order.package_id) || null;
     const row = storeOrderToAdminRow(order, storeName, bundleAmount);
 
-    const resolved = resolveOrderStatusFromSources({
-      candidateKeys: [
-        order.paystack_transaction_id,
-        order.payment_reference,
-        order.id,
-      ].filter(Boolean),
-      createdAt: order.created_at,
-      recipientMsisdn: order.customer_phone || order.phone_number,
-      amount: Math.abs(Number(order.amount || 0)),
-      networkId: order.network_id,
-      fallbackStatus: row.status,
-      externalRows,
-      overrides,
-    });
-    const externalMatch =
-      resolved.matchedExternal ||
-      findMatchingExternalAdminRow(
-        {
-          candidateKeys: [
-            order.paystack_transaction_id,
-            order.payment_reference,
-            order.id,
-          ].filter(Boolean),
-          createdAt: order.created_at,
-          recipientMsisdn: order.customer_phone || order.phone_number,
-          amount: Math.abs(Number(order.amount || 0)),
-          networkId: order.network_id,
-        },
-        externalRows
-      );
+    // Status resolution: admin override → database status (not live API)
+    const candidateKeys = [
+      order.paystack_transaction_id,
+      order.payment_reference,
+      order.id,
+    ].filter(Boolean);
+    const overrideStatus = findManualOverrideStatus(candidateKeys, overrides);
+    row.status = overrideStatus || row.status;
+
+    const externalMatch = findMatchingExternalAdminRow(
+      {
+        candidateKeys,
+        createdAt: order.created_at,
+        recipientMsisdn: order.customer_phone || order.phone_number,
+        amount: Math.abs(Number(order.amount || 0)),
+        networkId: order.network_id,
+      },
+      externalRows
+    );
 
     if (externalMatch) {
       row.reference = externalMatch.reference || row.reference;
@@ -192,7 +181,6 @@ export default async function MyAdminOrdersPage() {
       }
     }
 
-    row.status = resolved.status;
     storeRows.push(row);
   }
   console.log(`Processed ${storeRows.length} store orders`);
@@ -201,28 +189,21 @@ export default async function MyAdminOrdersPage() {
   const directRows: AdminOrderRow[] = [];
   for (const purchase of (purchases || []) as DbPurchaseRow[]) {
     const directRow = transactionToAdminRow(purchase, profileByUserId);
-    const resolved = resolveOrderStatusFromSources({
-      candidateKeys: purchaseKeys(purchase),
-      createdAt: purchase.created_at,
-      recipientMsisdn: purchase.recipient_msisdn,
-      amount: Math.abs(Number(purchase.amount || 0)),
-      networkId: purchase.network_id,
-      fallbackStatus: directRow.status,
-      externalRows,
-      overrides,
-    });
-    const externalMatch =
-      resolved.matchedExternal ||
-      findMatchingExternalAdminRow(
-        {
-          candidateKeys: purchaseKeys(purchase),
-          createdAt: purchase.created_at,
-          recipientMsisdn: purchase.recipient_msisdn,
-          amount: Math.abs(Number(purchase.amount || 0)),
-          networkId: purchase.network_id,
-        },
-        externalRows
-      );
+
+    // Status resolution: admin override → database status (not live API)
+    const overrideStatus = findManualOverrideStatus(purchaseKeys(purchase), overrides);
+    directRow.status = overrideStatus || directRow.status;
+
+    const externalMatch = findMatchingExternalAdminRow(
+      {
+        candidateKeys: purchaseKeys(purchase),
+        createdAt: purchase.created_at,
+        recipientMsisdn: purchase.recipient_msisdn,
+        amount: Math.abs(Number(purchase.amount || 0)),
+        networkId: purchase.network_id,
+      },
+      externalRows
+    );
 
     if (externalMatch) {
       directRow.reference = externalMatch.reference || directRow.reference;
@@ -244,7 +225,6 @@ export default async function MyAdminOrdersPage() {
       }
     }
 
-    directRow.status = resolved.status;
     directRows.push(directRow);
   }
   console.log(`Processed ${directRows.length} main site purchase rows`);
