@@ -2,6 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 
+const AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365; // 1 year
+
+function withPersistentCookieOptions(options: CookieOptions): CookieOptions {
+  if (options.maxAge === 0) {
+    return options;
+  }
+  return {
+    ...options,
+    maxAge: AUTH_COOKIE_MAX_AGE_SECONDS,
+    path: options.path ?? "/",
+    sameSite: options.sameSite ?? "lax",
+  };
+}
+
 /**
  * Sign in on the server and write Supabase auth cookies onto this response.
  * Avoids client-side setSession(), which races with AuthProvider and triggers
@@ -31,7 +45,7 @@ export async function POST(request: NextRequest) {
         },
         setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
           cookiesToSet.forEach(({ name, value, options }) =>
-            res.cookies.set(name, value, options)
+            res.cookies.set(name, value, withPersistentCookieOptions(options))
           );
         },
       },

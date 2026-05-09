@@ -2,6 +2,20 @@ import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { isAdminEmail } from "@/lib/admin-config";
 
+const AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365; // 1 year
+
+function withPersistentCookieOptions(options: CookieOptions): CookieOptions {
+  if (options.maxAge === 0) {
+    return options;
+  }
+  return {
+    ...options,
+    maxAge: AUTH_COOKIE_MAX_AGE_SECONDS,
+    path: options.path ?? "/",
+    sameSite: options.sameSite ?? "lax",
+  };
+}
+
 /** Pages that should redirect AWAY if user is logged in */
 const AUTH_PATHS = new Set(["/login", "/signup", "/forgot-password"]);
 
@@ -40,7 +54,11 @@ export async function middleware(request: NextRequest) {
           );
           supabaseResponse = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options),
+            supabaseResponse.cookies.set(
+              name,
+              value,
+              withPersistentCookieOptions(options)
+            ),
           );
         },
       },

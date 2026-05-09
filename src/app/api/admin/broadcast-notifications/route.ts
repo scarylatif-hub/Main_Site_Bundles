@@ -1,70 +1,221 @@
+// app/api/admin/broadcast-notifications/route.ts
+//
+// Arkesel V2  →  POST https://sms.arkesel.com/api/v2/sms/send
+// Key passed as header:  "api-key": "<your key>"
+// recipients  is a JSON array of strings, NOT comma-separated.
+
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/admin-api";
 
-export const dynamic = "force-dynamic";
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
 
-export async function GET() {
-  const ctx = await requireAdmin();
-  if (!ctx.ok) return ctx.response;
+type RecipientMode = "all" | "single" | "custom";
 
-  const { data, error } = await ctx.admin
-    .from("broadcast_notifications")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(100);
-
-  if (error) {
-    return NextResponse.json(
-      { error: error.message, items: [] },
-      { status: 500 }
-    );
-  }
-
-  return NextResponse.json({ items: data ?? [] });
+interface RequestBody {
+  title:      string;
+  message:    string;
+  mode:       RecipientMode;
+  /** null  → fetch all from DB (mode === "all")
+   *  array → use directly        (mode === "single" | "custom") */
+  recipients: string[] | null;
 }
 
-export async function POST(request: NextRequest) {
-  const ctx = await requireAdmin();
-  if (!ctx.ok) return ctx.response;
+interface BroadcastRow {
+  id:              string;
+  title:           string;
+  message:         string;
+  recipients_mode: RecipientMode;
+  recipient_count: number;
+  created_at:      string;
+}
 
-  let body: { title?: string; message?: string };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+interface SmsResult {
+  ok:              boolean;
+  code:            string;
+  message:         string;
+  recipient_count: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DB stubs  ── replace both with your real queries
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Return every subscribed phone number from your DB.
+ * Numbers must already be in Arkesel format (no "+"), e.g. "233544919953".
+ *
+ * ▶ TODO — Drizzle example:
+ *   const rows = await db
+ *     .select({ phone: users.phone })
+ *     .from(users)
+ *     .where(and(isNotNull(users.phone), eq(users.sms_opted_in, true)));
+ *   return rows.map((r) => r.phone).filter(Boolean) as string[];
+ */
+async function getAllSubscribedPhones(): Promise<string[]> {
+  return []; // ← replace
+}
+
+/**
+ * Persist the notification record and return the saved row.
+ *
+ * ▶ TODO — Drizzle example:
+ *   const [row] = await db
+ *     .insert(broadcastNotifications)
+ *     .values({ title, message, recipients_mode: mode, recipient_count: count })
+ *     .returning();
+ *   return row;
+ */
+async function saveNotification(
+  title:          string,
+  message:        string,
+  mode:           RecipientMode,
+  recipientCount: number,
+): Promise<BroadcastRow> {
+  return {                               // ← replace
+    id:              crypto.randomUUID(),
+    title,
+    message,
+    recipients_mode: mode,
+    recipient_count: recipientCount,
+    created_at:      new Date().toISOString(),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Arkesel V2 sender
+//
+// V2 differences vs V1:
+//   • endpoint  : POST /api/v2/sms/send  (not /sms/api)
+//   • auth      : header "api-key"       (not query param / body)
+//   • recipients: JSON array             (not comma-separated string)
+//   • success   : { status: "success" }  (not { code: "ok" })
+//
+// We batch at 1 000 numbers per request (Arkesel soft limit).
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function sendArkeselV2(
+  recipients: string[],
+  smsBody:    string,
+  apiKey:     string,
+  senderID:   string,
+): Promise<SmsResult> {
+  if (recipients.length === 0) {
+    return {
+      ok:              true,
+      code:            "skipped",
+      message:         "No recipients — SMS skipped.",
+      recipient_count: 0,
+    };
   }
 
-  const title = body.title?.trim();
-  const message = body.message?.trim();
+  const url   = "https://sms.arkesel.com/api/v2/sms/send";
+  const BATCH = 1_000;
 
-  if (!title || !message) {
-    return NextResponse.json(
-      { error: "title and message required" },
-      { status: 400 }
-    );
-  }
+  for (let i = 0; i < recipients.length; i += BATCH) {
+    const batch = recipients.slice(i, i + BATCH);
 
-  const { data, error } = await ctx.admin
-    .from("broadcast_notifications")
-    .insert({
-      title,
-      message,
-      created_by: ctx.actorId,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    console.error("broadcast_notifications insert:", error);
-    return NextResponse.json(
-      {
-        error:
-          error.message ||
-          "Could not save. Run SQL migration 002_admin_tables.sql in Supabase.",
+    const res = await fetch(url, {
+      method:  "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "api-key":      apiKey,            // V2 auth: header, not body
       },
-      { status: 500 }
-    );
+      body: JSON.stringify({
+        sender:     senderID,              // max 11 chars
+        message:    smsBody.slice(0, 459), // 3 SMS pages max
+        recipients: batch,                 // V2: array of strings
+      }),
+    });
+
+    const json = await res.json().catch(() => ({
+      status:  "error",
+      message: "Invalid JSON from Arkesel",
+    }));
+
+    // V2 success shape: { status: "success", data: [...] }
+    if (json.status !== "success") {
+      return {
+        ok:              false,
+        code:            String(res.status),
+        message:         json.message ?? "Arkesel V2 error",
+        recipient_count: 0,
+      };
+    }
   }
 
-  return NextResponse.json({ ok: true, item: data });
+  return {
+    ok:              true,
+    code:            "success",
+    message:         "SMS sent successfully.",
+    recipient_count: recipients.length,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Route handler
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function POST(req: NextRequest) {
+  try {
+    // 1. Parse body
+    const body: Partial<RequestBody> = await req.json().catch(() => ({}));
+
+    const title   = (body.title   ?? "").trim();
+    const message = (body.message ?? "").trim();
+    const mode    = (["all", "single", "custom"].includes(body.mode ?? "")
+      ? body.mode
+      : "all") as RecipientMode;
+
+    if (!title || !message) {
+      return NextResponse.json(
+        { error: "title and message are required." },
+        { status: 400 },
+      );
+    }
+
+    // 2. Resolve recipients
+    let recipients: string[];
+
+    if (Array.isArray(body.recipients) && body.recipients.length > 0) {
+      // single / custom — list already normalised by the panel
+      recipients = body.recipients;
+    } else {
+      // all — pull from DB
+      recipients = await getAllSubscribedPhones();
+    }
+
+    // 3. Persist to DB
+    const item = await saveNotification(title, message, mode, recipients.length);
+
+    // 4. Arkesel config from env
+    const apiKey   = process.env.ARKESEL_SMS_API_KEY;
+    const senderID = (process.env.ARKESEL_SENDER_ID ?? "NOTIFY").slice(0, 11);
+    // Note: ARKESEL_SMS_API_URL is ignored for V2 — endpoint is fixed above.
+    // Remove the V1 env var or leave it; it won't be used here.
+
+    // 5. Send SMS
+    let smsResult: SmsResult;
+
+    if (!apiKey) {
+      smsResult = {
+        ok:              true,
+        code:            "skipped",
+        message:         "ARKESEL_SMS_API_KEY not set — SMS skipped.",
+        recipient_count: 0,
+      };
+    } else {
+      const smsBody = `${title}\n${message}`;
+      smsResult     = await sendArkeselV2(recipients, smsBody, apiKey, senderID);
+    }
+
+    return NextResponse.json({ item, sms: smsResult }, { status: 200 });
+
+  } catch (err) {
+    console.error("[broadcast-notifications]", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Internal server error" },
+      { status: 500 },
+    );
+  }
 }

@@ -262,9 +262,7 @@ export default async function MyAdminOrdersPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">All orders</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Orders from main site and all stores. Store orders show the store name
-          with (store) label. Order ID is the provider&apos;s id. Status can be
-          updated here (saved by transaction reference).
+          All API Orders Here
         </p>
       </div>
       <AdminOrdersTable rows={allRows} initialOverrides={overrides} />

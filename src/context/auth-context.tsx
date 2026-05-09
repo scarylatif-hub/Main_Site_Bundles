@@ -210,11 +210,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [syncSession]);
 
+  useEffect(() => {
+    let disposed = false;
+
+    const refreshSession = async () => {
+      if (disposed) return;
+      const { data, error } = await supabase.auth.getSession();
+      if (disposed || error) return;
+      await syncSession(data.session ?? null);
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshSession();
+      }
+    };
+
+    // Keep session fresh for long-lived tabs.
+    const intervalId = window.setInterval(() => {
+      void refreshSession();
+    }, 1000 * 60 * 10);
+
+    const onWindowFocus = () => {
+      void refreshSession();
+    };
+
+    window.addEventListener("focus", onWindowFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", onWindowFocus);
+    };
+  }, [syncSession]);
+
   const logout = useCallback(async () => {
     setLoading(true);
 
     try {
-      // Sign out from Supabase first
+      // Clear server-managed auth cookies first.
+      await fetch("/api/auth/signout", {
+        method: "POST",
+        credentials: "include",
+      });
       await supabase.auth.signOut();
 
       // Clear local state immediately
