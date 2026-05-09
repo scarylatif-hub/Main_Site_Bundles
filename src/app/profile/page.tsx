@@ -18,7 +18,6 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AVATAR_OPTIONS, buildAvatarUrl } from "@/lib/avatars";
 import type { Profile } from "@/lib/definitions";
-import { getStoreUrl } from "@/lib/app-config";
 import {
   Dialog,
   DialogContent,
@@ -33,12 +32,10 @@ export default function ProfilePage() {
   const { user, userProfile, loading, logout, refreshUser } = useAuth();
   const router = useRouter();
 
-  // Local copy of profile so avatar updates are instant without waiting for refreshUser
   const [localProfile, setLocalProfile] = useState<Profile | null>(null);
   const [savingAvatarId, setSavingAvatarId] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
 
-  // Store creation state
   const [storeModalOpen, setStoreModalOpen] = useState(false);
   const [storeName, setStoreName] = useState("");
   const [storeSlug, setStoreSlug] = useState("");
@@ -91,7 +88,6 @@ export default function ProfilePage() {
     setAvatarError(null);
     setSavingAvatarId(avatarId);
 
-    // Optimistic update — show the new avatar immediately
     setLocalProfile((prev: Profile | null) =>
       prev ? { ...prev, avatar_url: nextAvatarUrl } : prev
     );
@@ -111,10 +107,8 @@ export default function ProfilePage() {
         );
       }
 
-      // Sync auth context so header updates too
       refreshUser();
     } catch (e) {
-      // Roll back optimistic update on failure
       setLocalProfile((prev: Profile | null) =>
         prev ? { ...prev, avatar_url: previousAvatarUrl || undefined } : prev
       );
@@ -142,12 +136,8 @@ export default function ProfilePage() {
       formData.append("description", storeDescription);
       formData.append("contactNumber", contactNumber);
       formData.append("whatsappLink", whatsappLink);
-      if (storeThemeColor) {
-        formData.append("themeColor", storeThemeColor);
-      }
-      if (storeLogoFile) {
-        formData.append("logo", storeLogoFile);
-      }
+      if (storeThemeColor) formData.append("themeColor", storeThemeColor);
+      if (storeLogoFile) formData.append("logo", storeLogoFile);
 
       const res = await fetch("/api/reseller/create-store", {
         method: "POST",
@@ -155,10 +145,7 @@ export default function ProfilePage() {
       });
 
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || "Failed to create store");
-      }
+      if (!res.ok) throw new Error(data.error || "Failed to create store");
 
       setStoreSuccess(data.message);
       setStoreModalOpen(false);
@@ -178,13 +165,8 @@ export default function ProfilePage() {
     }
   };
 
-  const generateSlug = (name: string) => {
-    return name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-      .substring(0, 50);
-  };
+  const generateSlug = (name: string) =>
+    name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").substring(0, 50);
 
   const handleStoreNameChange = (value: string) => {
     setStoreName(value);
@@ -192,42 +174,48 @@ export default function ProfilePage() {
   };
 
   const handleStoreSlugChange = (value: string) => {
-    const sanitized = value.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 50);
-    setStoreSlug(sanitized);
+    setStoreSlug(value.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 50));
   };
 
+  const storeDomain = process.env.NEXT_PUBLIC_STORE_DOMAIN || "bundles-store.vercel.app";
+  const storeUrl = storeSlug
+    ? `https://${storeDomain}/store/${storeSlug}`
+    : "/store/your-slug";
+
   return (
-    <div className="container mx-auto max-w-2xl px-4 py-8 sm:py-12">
+    <div className="container mx-auto max-w-2xl px-4 py-6 sm:py-12">
       <PageHeader
         title="My Profile"
         description="View and manage your account details."
       />
 
-      <div className="mt-8">
+      <div className="mt-6 sm:mt-8">
         <Card>
-          <CardHeader>
-            <div className="flex items-center gap-4">
+          {/* ── Profile header ── */}
+          <CardHeader className="pb-4">
+            <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-center sm:gap-4">
               <img
                 src={avatarUrl}
                 alt={`${displayName}'s avatar`}
-                className="w-24 h-24 rounded-full border-2 border-border"
+                className="w-20 h-20 sm:w-24 sm:h-24 rounded-full border-2 border-border shrink-0"
               />
-              <div>
-                <CardTitle className="text-3xl">{displayName}</CardTitle>
-                <CardDescription>{user.email}</CardDescription>
+              <div className="text-center sm:text-left min-w-0">
+                <CardTitle className="text-2xl sm:text-3xl break-words">{displayName}</CardTitle>
+                <CardDescription className="break-all">{user.email}</CardDescription>
               </div>
             </div>
           </CardHeader>
 
           <CardContent className="space-y-6">
 
-            {/* Avatar picker */}
+            {/* ── Avatar picker ── */}
             <div>
               <h3 className="font-semibold text-sm">Choose Avatar</h3>
               <p className="text-xs text-muted-foreground mt-0.5 mb-3">
-                Click any avatar to update your profile picture.
+                Tap any avatar to update your profile picture.
               </p>
-              <div className="grid grid-cols-6 gap-3">
+              {/* 5 cols on mobile → 6 on sm+ */}
+              <div className="grid grid-cols-5 sm:grid-cols-6 gap-2 sm:gap-3">
                 {AVATAR_OPTIONS.map((avatar) => {
                   const optionUrl = buildAvatarUrl(avatar.seed);
                   const isSelected = selectedAvatarUrl === optionUrl;
@@ -240,7 +228,7 @@ export default function ProfilePage() {
                       disabled={Boolean(savingAvatarId)}
                       aria-label={`Select ${avatar.label} avatar`}
                       className={[
-                        "h-12 w-12 rounded-full overflow-hidden border-2 transition-all",
+                        "aspect-square w-full rounded-full overflow-hidden border-2 transition-all",
                         isSelected
                           ? "border-primary ring-2 ring-primary/40 scale-110"
                           : "border-border hover:border-primary/60 hover:scale-105",
@@ -263,7 +251,7 @@ export default function ProfilePage() {
 
             <hr />
 
-            {/* Store section */}
+            {/* ── Store section ── */}
             <div>
               <h3 className="font-semibold text-sm">My Store</h3>
               {storeSuccess && (
@@ -272,25 +260,28 @@ export default function ProfilePage() {
               {storeError && (
                 <p className="text-xs text-destructive mt-2">{storeError}</p>
               )}
-              
+
               {!userProfile?.is_reseller ? (
                 <div className="mt-3">
-                  <p className="text-xs text-muted-foreground mb-2">
+                  <p className="text-xs text-muted-foreground mb-3">
                     Create a store to start selling data bundles and earning commission.
                   </p>
                   <Dialog open={storeModalOpen} onOpenChange={setStoreModalOpen}>
                     <DialogTrigger asChild>
-                      <Button>Create Store</Button>
+                      <Button className="w-full sm:w-auto">Create Store</Button>
                     </DialogTrigger>
-                    <DialogContent>
+
+                    {/* ScrollArea so the form never clips on small screens */}
+                    <DialogContent className="max-h-[90dvh] overflow-y-auto w-[calc(100vw-2rem)] sm:w-full max-w-lg">
                       <DialogHeader>
                         <DialogTitle>Create Your Store</DialogTitle>
                         <DialogDescription>
                           Set up your store name and URL. Your store will be pending approval.
                         </DialogDescription>
                       </DialogHeader>
-                      <form onSubmit={handleCreateStore} className="space-y-4">
-                        <div>
+
+                      <form onSubmit={handleCreateStore} className="space-y-4 pt-1">
+                        <div className="space-y-1.5">
                           <Label htmlFor="storeName">Store Name</Label>
                           <Input
                             id="storeName"
@@ -300,7 +291,8 @@ export default function ProfilePage() {
                             required
                           />
                         </div>
-                        <div>
+
+                        <div className="space-y-1.5">
                           <Label htmlFor="storeSlug">Store URL Slug</Label>
                           <Input
                             id="storeSlug"
@@ -310,12 +302,15 @@ export default function ProfilePage() {
                             required
                             title="Only lowercase letters, numbers, and hyphens allowed"
                           />
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Your store URL: {storeSlug ? `https://${process.env.NEXT_PUBLIC_STORE_DOMAIN || "bundles-store.vercel.app"}/store/${storeSlug}` : "/store/your-slug"}
+                          {/* URL preview — truncate long slugs gracefully */}
+                          <p className="text-xs text-muted-foreground break-all">
+                            Your store URL:{" "}
+                            <span className="font-medium">{storeUrl}</span>
                           </p>
                         </div>
-                        <div>
-                          <Label htmlFor="oneGbPrice">How much do you want to sell 1GB for? (GHS)</Label>
+
+                        <div className="space-y-1.5">
+                          <Label htmlFor="oneGbPrice">Price per 1 GB (GHS)</Label>
                           <Input
                             id="oneGbPrice"
                             type="number"
@@ -326,12 +321,13 @@ export default function ProfilePage() {
                             placeholder="5.29"
                             required
                           />
-                          <p className="text-xs text-muted-foreground mt-1">
-                            This price will be used to calculate your profit margin automatically.
+                          <p className="text-xs text-muted-foreground">
+                            Used to calculate your profit margin automatically.
                           </p>
                         </div>
-                        <div>
-                          <Label htmlFor="storeDescription">Store Description (Optional)</Label>
+
+                        <div className="space-y-1.5">
+                          <Label htmlFor="storeDescription">Description <span className="text-muted-foreground">(optional)</span></Label>
                           <Textarea
                             id="storeDescription"
                             value={storeDescription}
@@ -340,8 +336,9 @@ export default function ProfilePage() {
                             rows={3}
                           />
                         </div>
-                        <div>
-                          <Label htmlFor="contactNumber">Contact Number (Optional)</Label>
+
+                        <div className="space-y-1.5">
+                          <Label htmlFor="contactNumber">Contact Number <span className="text-muted-foreground">(optional)</span></Label>
                           <Input
                             id="contactNumber"
                             value={contactNumber}
@@ -349,8 +346,9 @@ export default function ProfilePage() {
                             placeholder="0595919802"
                           />
                         </div>
-                        <div>
-                          <Label htmlFor="whatsappLink">WhatsApp Link (Optional)</Label>
+
+                        <div className="space-y-1.5">
+                          <Label htmlFor="whatsappLink">WhatsApp Link <span className="text-muted-foreground">(optional)</span></Label>
                           <Input
                             id="whatsappLink"
                             value={whatsappLink}
@@ -358,48 +356,56 @@ export default function ProfilePage() {
                             placeholder="https://wa.me/233595919802"
                           />
                         </div>
-                        <div>
-                          <Label htmlFor="storeThemeColor">Store Color (Optional)</Label>
-                          <div className="mt-2 flex items-center gap-2">
+
+                        <div className="space-y-1.5">
+                          <Label htmlFor="storeThemeColor">Store Color <span className="text-muted-foreground">(optional)</span></Label>
+                          <div className="flex items-center gap-2">
                             <Input
                               id="storeThemeColor"
                               type="color"
                               value={storeThemeColor}
                               onChange={(e) => setStoreThemeColor(e.target.value)}
-                              className="h-10 w-16 p-1"
+                              className="h-10 w-14 p-1 shrink-0"
                             />
                             <Input
                               value={storeThemeColor}
                               onChange={(e) => setStoreThemeColor(e.target.value)}
                               placeholder="#000000"
+                              className="flex-1"
                             />
                           </div>
                         </div>
-                        <div>
-                          <Label htmlFor="storeLogo">Store Logo (Optional)</Label>
+
+                        <div className="space-y-1.5">
+                          <Label htmlFor="storeLogo">Store Logo <span className="text-muted-foreground">(optional)</span></Label>
                           <Input
                             id="storeLogo"
                             type="file"
                             accept="image/*"
                             onChange={(e) => setStoreLogoFile(e.target.files?.[0] ?? null)}
-                            className="mt-2"
                           />
-                          {storeLogoFile ? (
-                            <p className="text-xs text-muted-foreground mt-1">
+                          {storeLogoFile && (
+                            <p className="text-xs text-muted-foreground">
                               Selected: {storeLogoFile.name}
                             </p>
-                          ) : null}
+                          )}
                         </div>
-                        <div className="flex gap-2 justify-end">
+
+                        <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end pt-1">
                           <Button
                             type="button"
-                            className="bg-transparent border border-input hover:bg-accent hover:text-accent-foreground"
+                            variant="outline"
                             onClick={() => setStoreModalOpen(false)}
+                            className="w-full sm:w-auto"
                           >
                             Cancel
                           </Button>
-                          <Button type="submit" disabled={creatingStore}>
-                            {creatingStore ? "Creating..." : "Create Store"}
+                          <Button
+                            type="submit"
+                            disabled={creatingStore}
+                            className="w-full sm:w-auto"
+                          >
+                            {creatingStore ? "Creating…" : "Create Store"}
                           </Button>
                         </div>
                       </form>
@@ -408,32 +414,32 @@ export default function ProfilePage() {
                 </div>
               ) : (
                 <div className="mt-3 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Store Name:</span>
-                    <span className="text-sm">{userProfile?.store_name || "—"}</span>
+                  {/* Stack label+value vertically on very small screens */}
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5">
+                    <span className="text-sm font-medium">Store Name</span>
+                    <span className="text-sm text-muted-foreground">{userProfile?.store_name || "—"}</span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Store URL:</span>
-                    <span className="text-sm text-muted-foreground">
-                      {userProfile?.reseller_slug ? `https://${process.env.NEXT_PUBLIC_STORE_DOMAIN || "bundles-store.vercel.app"}/store/${userProfile.reseller_slug}` : "—"}
+                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-0.5">
+                    <span className="text-sm font-medium shrink-0">Store URL</span>
+                    <span className="text-sm text-muted-foreground break-all text-left sm:text-right">
+                      {userProfile?.reseller_slug
+                        ? `https://${storeDomain}/store/${userProfile.reseller_slug}`
+                        : "—"}
                     </span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">Status:</span>
-                    <span className={`text-sm ${
-                      userProfile?.reseller_approved 
-                        ? "text-green-600" 
-                        : "text-yellow-600"
-                    }`}>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5">
+                    <span className="text-sm font-medium">Status</span>
+                    <span className={`text-sm font-medium ${userProfile?.reseller_approved ? "text-green-600" : "text-yellow-600"}`}>
                       {userProfile?.reseller_approved ? "Approved" : "Pending Approval"}
                     </span>
                   </div>
+
                   {userProfile?.reseller_approved && userProfile?.store_active && (
-                    <div className="space-y-2 mt-2">
+                    <div className="space-y-2 pt-2">
                       <Button asChild className="w-full">
                         <a href="/reseller/dashboard">Store Dashboard</a>
                       </Button>
-                      <Button asChild className="w-full bg-transparent border border-input hover:bg-accent hover:text-accent-foreground">
+                      <Button asChild variant="outline" className="w-full">
                         <a href={`/store/${userProfile.reseller_slug}`}>Visit My Store</a>
                       </Button>
                     </div>
@@ -444,39 +450,34 @@ export default function ProfilePage() {
 
             <hr />
 
-            {/* Account info */}
+            {/* ── Account info ── */}
             <div>
               <h3 className="font-semibold text-sm">Account Information</h3>
-              <ul className="text-sm text-muted-foreground mt-2 space-y-1.5">
-                <li>
-                  <span className="font-medium text-foreground">Full Name: </span>
-                  {userProfile?.full_name ?? "—"}
+              <ul className="text-sm text-muted-foreground mt-2 space-y-2">
+                <li className="flex flex-col sm:flex-row sm:gap-1">
+                  <span className="font-medium text-foreground">Full Name:</span>
+                  <span>{userProfile?.full_name ?? "—"}</span>
                 </li>
-                <li>
-                  <span className="font-medium text-foreground">Email: </span>
-                  {user.email}
+                <li className="flex flex-col sm:flex-row sm:gap-1">
+                  <span className="font-medium text-foreground">Email:</span>
+                  <span className="break-all">{user.email}</span>
                 </li>
-                <li>
-                  <span className="font-medium text-foreground">Phone: </span>
-                  {userProfile?.phone_number ?? "—"}
+                <li className="flex flex-col sm:flex-row sm:gap-1">
+                  <span className="font-medium text-foreground">Phone:</span>
+                  <span>{userProfile?.phone_number ?? "—"}</span>
                 </li>
               </ul>
             </div>
 
             <hr />
 
-            {/* Danger zone */}
+            {/* ── Danger zone ── */}
             <div>
-              <h3 className="font-semibold text-sm text-destructive">
-                Danger Zone
-              </h3>
-              <p className="text-xs text-muted-foreground mt-0.5 mb-2">
+              <h3 className="font-semibold text-sm text-destructive">Danger Zone</h3>
+              <p className="text-xs text-muted-foreground mt-0.5 mb-3">
                 Log out of your account on this device.
               </p>
-              <Button
-                className="bg-transparent border border-input hover:bg-accent hover:text-accent-foreground"
-                onClick={logout}
-              >
+              <Button variant="outline" onClick={logout} className="w-full sm:w-auto">
                 Log out
               </Button>
             </div>
