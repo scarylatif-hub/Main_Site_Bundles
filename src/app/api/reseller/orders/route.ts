@@ -110,9 +110,7 @@ export async function GET(req: Request) {
 
       return {
         ...order,
-        network_id: order.network_id
-          ? datakazinaNetworkIdToDisplay(order.network_id)
-          : null,
+        network_id: order.network_id || null,
         status: resolved.status,
       };
     });

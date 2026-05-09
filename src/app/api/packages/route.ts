@@ -67,7 +67,7 @@ export async function GET() {
     }
 
     if (pkgResult.data.length === 0) {
-      console.error('No packages returned from DataKazina API');
+      console.error('No packages returned from provider API');
       return NextResponse.json(
         { error: 'No packages available' },
         { status: 500 }
@@ -87,7 +87,7 @@ export async function GET() {
 
     return NextResponse.json(mappedPackages);
   } catch (error) {
-    console.error('Error fetching packages from DataKazina:', error);
+    console.error('Error fetching packages from provider:', error);
     return NextResponse.json(
       { error: 'Failed to fetch packages' },
       { status: 500 }

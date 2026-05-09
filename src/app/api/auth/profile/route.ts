@@ -80,11 +80,13 @@ export async function GET(request: NextRequest) {
   try {
     const supabase = await createClient();
 
+    // Use getUser() for secure server-side authentication
     const {
-      data: { session },
-    } = await supabase.auth.getSession();
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
 
-    if (!session) {
+    if (userError || !user) {
       return NextResponse.json(
         { error: 'Not authenticated' },
         { status: 401 }
@@ -94,7 +96,7 @@ export async function GET(request: NextRequest) {
     const { data: profile, error } = await supabase
       .from('profiles')
       .select('*')
-      .eq('id', session.user.id)
+      .eq('id', user.id)
       .maybeSingle();
 
     if (error) {

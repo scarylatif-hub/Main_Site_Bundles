@@ -99,7 +99,7 @@ function StatusBadge({ status }: { status: string }) {
     );
   if (s === "pending" || s === "processing")
     return (
-      <Badge variant="secondary" className="gap-1 bg-sky-100 text-sky-900 hover:bg-sky-100/90 whitespace-nowrap">
+      <Badge className="gap-1 bg-sky-100 text-sky-900 hover:bg-sky-100/90 whitespace-nowrap">
         <RefreshCw className="h-3 w-3" /> PROCESSING
       </Badge>
     );
@@ -111,11 +111,11 @@ function StatusBadge({ status }: { status: string }) {
     );
   if (s === "canceled" || s === "cancelled")
     return (
-      <Badge variant="secondary" className="gap-1 bg-zinc-200 text-zinc-900 whitespace-nowrap">
+      <Badge className="gap-1 bg-zinc-200 text-zinc-900 whitespace-nowrap">
         <XCircle className="h-3 w-3" /> CANCELED
       </Badge>
     );
-  return <Badge variant="destructive" className="whitespace-nowrap">{status.toUpperCase()}</Badge>;
+  return <Badge className="whitespace-nowrap bg-red-600 text-white">{status.toUpperCase()}</Badge>;
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -139,6 +139,9 @@ export function AdminOrdersTable({
   const [statusFilter, setStatusFilter] = useState("all");
   const [networkFilter, setNetworkFilter] = useState("all");
   const [sourceFilter, setSourceFilter] = useState("all"); // "all" | "direct" | "store"
+  const [rangeStart, setRangeStart] = useState("");
+  const [rangeEnd, setRangeEnd] = useState("");
+  const [bulkUpdating, setBulkUpdating] = useState(false);
 
   // Unique networks from current data for the filter dropdown
   const availableNetworks = useMemo(() => {
@@ -215,6 +218,35 @@ export function AdminOrdersTable({
     setPageIndex(0);
   }
 
+  function parseLocalDateTime(value: string): number | null {
+    if (!value) return null;
+    const dt = new Date(value);
+    const ts = dt.getTime();
+    return Number.isFinite(ts) ? ts : null;
+  }
+
+  const selectedRangeRows = useMemo(() => {
+    const start = parseLocalDateTime(rangeStart);
+    const end = parseLocalDateTime(rangeEnd);
+    if (start == null || end == null || end < start) return [];
+    return filteredRows.filter((row) => {
+      const ts = new Date(row.created_at).getTime();
+      return ts >= start && ts <= end;
+    });
+  }, [filteredRows, rangeStart, rangeEnd]);
+
+  const selectedRangeIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          selectedRangeRows
+            .map((row) => overrideKey(row))
+            .filter((id) => id && id.trim())
+        )
+      ),
+    [selectedRangeRows]
+  );
+
   // ── Status update ─────────────────────────────────────────────────────────
   async function updateStatus(row: AdminOrderRow, status: string) {
     const transaction_id = overrideKey(row);
@@ -238,6 +270,73 @@ export function AdminOrdersTable({
       toast({ title: "Could not update", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" });
     } finally {
       setSaving(null);
+    }
+  }
+
+  async function bulkSetDeliveredByRange() {
+    if (!rangeStart || !rangeEnd) {
+      toast({
+        title: "Pick date range",
+        description: "Please choose both start and end date/time.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const start = parseLocalDateTime(rangeStart);
+    const end = parseLocalDateTime(rangeEnd);
+    if (start == null || end == null || end < start) {
+      toast({
+        title: "Invalid range",
+        description: "End date/time must be after start date/time.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (selectedRangeIds.length === 0) {
+      toast({
+        title: "No matching orders",
+        description: "No orders found in the selected range.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setBulkUpdating(true);
+    try {
+      const res = await fetch("/api/admin/provider-orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          transaction_ids: selectedRangeIds,
+          status: "delivered",
+        }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || "Bulk update failed");
+
+      setOverrides((prev) => {
+        const next = { ...prev };
+        for (const id of selectedRangeIds) {
+          next[id] = "delivered";
+        }
+        return next;
+      });
+
+      toast({
+        title: "Bulk update complete",
+        description: `${selectedRangeIds.length} order(s) marked as delivered.`,
+      });
+    } catch (e) {
+      toast({
+        title: "Bulk update failed",
+        description: e instanceof Error ? e.message : "Unknown error",
+        variant: "destructive",
+      });
+    } finally {
+      setBulkUpdating(false);
     }
   }
 
@@ -273,11 +372,11 @@ export function AdminOrdersTable({
         {/* Filter dropdown: Status + Network + Source */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="shrink-0 gap-2">
+            <Button className="h-9 shrink-0 gap-2 border border-input bg-transparent px-3 text-sm hover:bg-accent hover:text-accent-foreground">
               <Filter className="h-4 w-4" />
               Filter
               {activeFilterCount > 0 && (
-                <Badge variant="secondary" className="rounded-full px-1.5 text-xs">
+                <Badge className="rounded-full px-1.5 text-xs bg-muted text-foreground">
                   {activeFilterCount}
                 </Badge>
               )}
@@ -342,6 +441,38 @@ export function AdminOrdersTable({
         )}
       </div>
 
+      {/* ── Bulk status by time range ── */}
+      <div className="rounded-md border bg-muted/20 p-3">
+        <div className="text-sm font-medium mb-2">Bulk mark delivered by date/time range</div>
+        <div className="flex flex-col lg:flex-row lg:items-end gap-2">
+          <div className="flex-1">
+            <label className="text-xs text-muted-foreground mb-1 block">Start</label>
+            <Input
+              type="datetime-local"
+              value={rangeStart}
+              onChange={(e) => setRangeStart(e.target.value)}
+            />
+          </div>
+          <div className="flex-1">
+            <label className="text-xs text-muted-foreground mb-1 block">End</label>
+            <Input
+              type="datetime-local"
+              value={rangeEnd}
+              onChange={(e) => setRangeEnd(e.target.value)}
+            />
+          </div>
+          <Button
+            onClick={bulkSetDeliveredByRange}
+            disabled={bulkUpdating || selectedRangeIds.length === 0}
+          >
+            {bulkUpdating ? "Updating..." : "Mark Range Delivered"}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground mt-2">
+          Applies to currently filtered rows. Matching orders in range: {selectedRangeRows.length}
+        </p>
+      </div>
+
       {/* ── Table card ── */}
       <div className="w-full min-w-0 rounded-md border bg-card overflow-hidden">
         <div
@@ -385,11 +516,11 @@ export function AdminOrdersTable({
                       </TableCell>
                       <TableCell className="text-sm whitespace-nowrap">
                         {row.isStore ? (
-                          <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-200 whitespace-nowrap">
+                          <Badge className="bg-orange-50 text-orange-700 border-orange-200 whitespace-nowrap">
                             Store
                           </Badge>
                         ) : (
-                          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 whitespace-nowrap">
+                          <Badge className="bg-blue-50 text-blue-700 border-blue-200 whitespace-nowrap">
                             Direct
                           </Badge>
                         )}
@@ -415,7 +546,7 @@ export function AdminOrdersTable({
                         {row.recipient_msisdn ?? "—"}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">
-                        <Badge variant="outline" className="bg-orange-50 text-orange-800 border-orange-200 whitespace-nowrap">
+                        <Badge className="bg-orange-50 text-orange-800 border-orange-200 whitespace-nowrap">
                           {net}
                         </Badge>
                       </TableCell>

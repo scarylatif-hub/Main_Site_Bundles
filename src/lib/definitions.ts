@@ -61,6 +61,11 @@ export type Profile = {
   reseller_slug?: string;
   reseller_approved?: boolean;
   store_active?: boolean;
+  store_description?: string;
+  store_theme_color?: string;
+  store_logo_url?: string;
+  contact_number?: string;
+  whatsapp_link?: string;
   avatar_url?: string;
   updated_at: string;
 };

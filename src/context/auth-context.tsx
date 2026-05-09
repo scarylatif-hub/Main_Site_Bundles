@@ -12,7 +12,7 @@ import {
 } from "react";
 import { supabase } from "@/lib/supabase/client";
 import type { Profile } from "@/lib/definitions";
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { type Session, type User } from "@supabase/supabase-js";
 
 export type AuthContextType = {
@@ -25,6 +25,11 @@ export type AuthContextType = {
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const PROFILE_CACHE_PREFIX = "profile-cache:";
+
+function profileStorageKey(userId: string): string {
+  return `${PROFILE_CACHE_PREFIX}${userId}`;
+}
 
 function normalizeProfile(data: any): Profile {
   return {
@@ -34,41 +39,84 @@ function normalizeProfile(data: any): Profile {
   } as Profile;
 }
 
+// Simple in-memory cache to prevent duplicate fetches within 5 seconds
+const profileCache = new Map<string, { profile: Profile | null; timestamp: number }>();
+const CACHE_DURATION = 5000; // 5 seconds
+
+function getPersistedProfile(userId: string): Profile | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(profileStorageKey(userId));
+    if (!raw) return null;
+    return normalizeProfile(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function persistProfile(userId: string, profile: Profile | null): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    if (!profile) {
+      window.localStorage.removeItem(profileStorageKey(userId));
+      return;
+    }
+    window.localStorage.setItem(profileStorageKey(userId), JSON.stringify(profile));
+  } catch {
+    // Ignore localStorage failures.
+  }
+}
+
 async function fetchProfile(userId: string): Promise<Profile | null> {
+  // Check cache first
+  const cached = profileCache.get(userId);
+  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    return cached.profile;
+  }
+
   try {
     const response = await fetch("/api/auth/profile", {
       credentials: "include",
-      cache: "no-store",
+      cache: "no-cache",
       headers: {
         "x-profile-user-id": userId,
       },
     });
 
     if (response.status === 401 || response.status === 404) {
+      profileCache.set(userId, { profile: null, timestamp: Date.now() });
       return null;
     }
 
     if (!response.ok) {
       const message = await response.text().catch(() => "");
       console.error("fetchProfile API error:", response.status, message);
+      profileCache.set(userId, { profile: null, timestamp: Date.now() });
       return null;
     }
 
     const profile = await response.json();
     if (!profile) {
+      profileCache.set(userId, { profile: null, timestamp: Date.now() });
       return null;
     }
 
-    return normalizeProfile(profile);
+    const normalizedProfile = normalizeProfile(profile);
+    profileCache.set(userId, { profile: normalizedProfile, timestamp: Date.now() });
+    return normalizedProfile;
   } catch (error) {
     console.error("fetchProfile unexpected error:", error);
+    profileCache.set(userId, { profile: null, timestamp: Date.now() });
     return null;
   }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
-  const pathname = usePathname();
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<Profile | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -76,23 +124,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const profileRequestIdRef = useRef(0);
 
   const syncSession = useCallback(
-    async (nextSession: Session | null, options?: { keepLoading?: boolean }) => {
-      const keepLoading = options?.keepLoading ?? false;
+    async (nextSession: Session | null) => {
       const nextUser = nextSession?.user ?? null;
 
       setSession(nextSession);
       setUser(nextUser);
-
-      if (!keepLoading) {
-        setLoading(true);
-      }
+      setLoading(false);
 
       const requestId = ++profileRequestIdRef.current;
 
       if (!nextUser) {
         setUserProfile(null);
-        setLoading(false);
         return;
+      }
+
+      const persisted = getPersistedProfile(nextUser.id);
+      if (persisted) {
+        setUserProfile(persisted);
+      } else {
+        setUserProfile((current) => (current?.id === nextUser.id ? current : null));
       }
 
       const profile = await fetchProfile(nextUser.id);
@@ -101,7 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       setUserProfile(profile);
-      setLoading(false);
+      persistProfile(nextUser.id, profile);
     },
     []
   );
@@ -120,17 +170,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setUserProfile(profile);
+    persistProfile(currentUserId, profile);
   }, [user?.id]);
 
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(async ({ data: { session: initialSession } }) => {
-      if (!mounted) {
-        return;
-      }
-      await syncSession(initialSession);
-    });
+    supabase.auth
+      .getSession()
+      .then(async ({ data: { session: initialSession } }) => {
+        if (!mounted) {
+          return;
+        }
+        await syncSession(initialSession);
+      })
+      .catch((error) => {
+        console.error("getSession error:", error);
+        if (!mounted) {
+          return;
+        }
+        setSession(null);
+        setUser(null);
+        setUserProfile(null);
+        setLoading(false);
+      });
 
     const {
       data: { subscription },
@@ -147,31 +210,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [syncSession]);
 
-  useEffect(() => {
-    if (!session?.user?.id) {
-      return;
-    }
-
-    void refreshUser();
-  }, [pathname, session?.user?.id, refreshUser]);
-
   const logout = useCallback(async () => {
     setLoading(true);
 
     try {
-      try {
-        await fetch("/api/auth/signout", {
-          method: "POST",
-          credentials: "same-origin",
-          cache: "no-store",
-        });
-      } finally {
-        await supabase.auth.signOut();
-      }
+      // Sign out from Supabase first
+      await supabase.auth.signOut();
 
+      // Clear local state immediately
       setUser(null);
       setUserProfile(null);
       setSession(null);
+      profileCache.clear();
+
+      // Redirect immediately
       router.push("/login");
       router.refresh();
     } catch (error) {

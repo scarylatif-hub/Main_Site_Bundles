@@ -76,7 +76,7 @@ export default async function MyAdminOrdersPage() {
   }
 
   // Fetch external API orders (main site)
-  console.log("Fetching external orders from DataKazina...");
+  console.log("Fetching external orders from provider...");
   const rawExternal = await fetchExternalAllOrdersRaw();
   const externalRows: AdminOrderRow[] = [];
   for (const raw of rawExternal) {

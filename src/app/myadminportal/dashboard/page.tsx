@@ -16,6 +16,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { MaintenanceToggle } from "@/components/maintenance-toggle";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Store, Wallet } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -336,14 +340,32 @@ export default async function MyAdminDashboardPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Overview of users, sales, and estimated profit across main site and store orders.
-        </p>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-muted-foreground text-sm mt-1">
+            Overview of users, sales, and estimated profit across main site and store orders.
+          </p>
+        </div>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+          <Button asChild variant="outline" className="w-full gap-2 sm:w-auto">
+            <Link href="/myadminportal/withdrawals">
+              <Wallet className="h-4 w-4" />
+              Withdrawal Approval
+            </Link>
+          </Button>
+          <Button asChild variant="outline" className="w-full gap-2 sm:w-auto">
+            <Link href="/myadminportal/stores-balances">
+              <Store className="h-4 w-4" />
+              Stores & Balances
+            </Link>
+          </Button>
+        </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-4">
+      <MaintenanceToggle />
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardDescription>Total users</CardDescription>

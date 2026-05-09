@@ -69,6 +69,8 @@ export async function PATCH(req: NextRequest) {
     store_name: storeName,
     store_description: description,
     store_theme_color: themeColor,
+    contact_number: contactNumber || null,
+    whatsapp_link: whatsappLink || null,
   };
 
   if (logoUrl) {

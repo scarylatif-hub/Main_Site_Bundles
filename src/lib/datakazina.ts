@@ -17,7 +17,7 @@ const BASE_URL = process.env.DATAKAZINA_BASE_URL; // https://reseller.dakazinabu
 const MAIN_BASE_URL = process.env.DATAKAZINA_MAIN_BASE_URL; // Main DataKazina endpoint
 
 if (!API_KEY || !BASE_URL) {
-  console.warn("[datakazina] Missing env vars", {
+  console.warn("[provider-api] Missing env vars", {
     hasApiKey:  !!API_KEY,
     hasBaseUrl: !!BASE_URL,
   });
@@ -96,7 +96,7 @@ class DataKazinaAPI {
         parsed = rawText.trim() ? JSON.parse(rawText) : {};
       } catch {
         // 2xx but non-JSON body — still a success
-        console.warn("[datakazina] 2xx response was not JSON");
+        console.warn("[provider-api] 2xx response was not JSON");
         parsed = { raw: rawText };
       }
 
@@ -117,7 +117,7 @@ class DataKazinaAPI {
       };
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Network error";
-      console.error(`[datakazina] fetch threw:`, msg);
+      console.error(`[provider-api] fetch threw:`, msg);
       return { ok: false, data: null, status: 0, rawText: msg };
     }
   }

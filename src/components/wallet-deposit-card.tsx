@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useAuth } from "@/context/auth-context";
 import { useToast } from "@/hooks/use-toast";
 import { usePaystack } from "@/hooks/use-paystack";
+import { useMaintenanceMode } from "@/hooks/use-maintenance-mode";
 
 type WalletDepositCardProps = {
   id?: string;
@@ -16,6 +17,7 @@ type WalletDepositCardProps = {
 export function WalletDepositCard({ id, className }: WalletDepositCardProps) {
   const { user, userProfile, refreshUser } = useAuth();
   const { toast } = useToast();
+  const { isMaintenance } = useMaintenanceMode();
   const [depositAmount, setDepositAmount] = useState("");
 
   const paystackPublicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY;
@@ -86,17 +88,23 @@ export function WalletDepositCard({ id, className }: WalletDepositCardProps) {
           placeholder="Amount in GHS"
           min="1"
           className="h-11"
+          disabled={isMaintenance}
         />
       </div>
       <Button
         type="button"
         onClick={handleProceedToPayment}
-        disabled={!user?.email || parseFloat(depositAmount) < 1 || isInitializing}
+        disabled={!user?.email || parseFloat(depositAmount) < 1 || isInitializing || isMaintenance}
         className="shrink-0 h-11 px-8"
       >
-        {isInitializing ? "Processing…" : "Deposit Funds"}
+        {isMaintenance ? "Maintenance Mode" : isInitializing ? "Processing…" : "Deposit Funds"}
       </Button>
     </div>
+    {isMaintenance && (
+      <p className="text-sm text-orange-600 dark:text-orange-400 mt-2">
+        Deposits are currently disabled due to maintenance.
+      </p>
+    )}
   </CardContent>
 </Card>
   );

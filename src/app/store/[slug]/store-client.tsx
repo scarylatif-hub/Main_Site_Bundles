@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { toast } from "@/hooks/use-toast";
 import type { Profile } from "@/lib/definitions";
+import { useMaintenanceMode } from "@/hooks/use-maintenance-mode";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -102,6 +103,7 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [showConfirm, setShowConfirm]   = useState(false);
   const [step, setStep]                 = useState<"phone" | "packages">("phone");
+  const { isMaintenance } = useMaintenanceMode();
 
   // Theme from store owner
   const themeColor = (storeOwner as any).store_theme_color || "#6366f1";
@@ -868,6 +870,7 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
                       value={phone}
                       onChange={e => handlePhoneChange(e.target.value)}
                       autoComplete="tel"
+                      disabled={isMaintenance}
                     />
                     {detectedNet && (
                       <div
@@ -893,13 +896,19 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
                       placeholder="e.g. Kwame"
                       value={name}
                       onChange={e => setName(e.target.value)}
+                      disabled={isMaintenance}
                     />
                     <p className="field-hint">Helps you track your orders later</p>
                   </div>
 
-                  <button className="btn-primary" onClick={handlePhoneContinue}>
-                    Browse Packages →
+                  <button className="btn-primary" onClick={handlePhoneContinue} disabled={isMaintenance}>
+                    {isMaintenance ? "Maintenance Mode" : "Browse Packages →"}
                   </button>
+                  {isMaintenance && (
+                    <p className="text-sm text-orange-600 dark:text-orange-400 mt-2 text-center">
+                      Purchases are currently disabled due to maintenance.
+                    </p>
+                  )}
                 </div>
               )}
 

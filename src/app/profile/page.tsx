@@ -27,6 +27,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 
 export default function ProfilePage() {
   const { user, userProfile, loading, logout, refreshUser } = useAuth();
@@ -34,13 +35,19 @@ export default function ProfilePage() {
 
   // Local copy of profile so avatar updates are instant without waiting for refreshUser
   const [localProfile, setLocalProfile] = useState<Profile | null>(null);
-  const [savingAvatarId, setSavingAvatarId]   = useState<string | null>(null);
-  const [avatarError, setAvatarError]         = useState<string | null>(null);
+  const [savingAvatarId, setSavingAvatarId] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
 
   // Store creation state
   const [storeModalOpen, setStoreModalOpen] = useState(false);
   const [storeName, setStoreName] = useState("");
   const [storeSlug, setStoreSlug] = useState("");
+  const [oneGbPrice, setOneGbPrice] = useState("");
+  const [storeDescription, setStoreDescription] = useState("We sell affordable Data Packages");
+  const [contactNumber, setContactNumber] = useState("");
+  const [whatsappLink, setWhatsappLink] = useState("");
+  const [storeThemeColor, setStoreThemeColor] = useState("#000000");
+  const [storeLogoFile, setStoreLogoFile] = useState<File | null>(null);
   const [creatingStore, setCreatingStore] = useState(false);
   const [storeError, setStoreError] = useState<string | null>(null);
   const [storeSuccess, setStoreSuccess] = useState<string | null>(null);
@@ -121,17 +128,30 @@ export default function ProfilePage() {
 
   const handleCreateStore = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!storeName || !storeSlug) return;
+    if (!storeName || !storeSlug || !oneGbPrice) return;
 
     setCreatingStore(true);
     setStoreError(null);
     setStoreSuccess(null);
 
     try {
+      const formData = new FormData();
+      formData.append("storeName", storeName);
+      formData.append("storeSlug", storeSlug);
+      formData.append("oneGbPrice", oneGbPrice);
+      formData.append("description", storeDescription);
+      formData.append("contactNumber", contactNumber);
+      formData.append("whatsappLink", whatsappLink);
+      if (storeThemeColor) {
+        formData.append("themeColor", storeThemeColor);
+      }
+      if (storeLogoFile) {
+        formData.append("logo", storeLogoFile);
+      }
+
       const res = await fetch("/api/reseller/create-store", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storeName, storeSlug }),
+        body: formData,
       });
 
       const data = await res.json();
@@ -144,6 +164,12 @@ export default function ProfilePage() {
       setStoreModalOpen(false);
       setStoreName("");
       setStoreSlug("");
+      setOneGbPrice("");
+      setStoreDescription("We sell affordable Data Packages");
+      setContactNumber("");
+      setWhatsappLink("");
+      setStoreThemeColor("#000000");
+      setStoreLogoFile(null);
       refreshUser();
     } catch (error) {
       setStoreError(error instanceof Error ? error.message : "Failed to create store");
@@ -163,6 +189,11 @@ export default function ProfilePage() {
   const handleStoreNameChange = (value: string) => {
     setStoreName(value);
     setStoreSlug(generateSlug(value));
+  };
+
+  const handleStoreSlugChange = (value: string) => {
+    const sanitized = value.toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 50);
+    setStoreSlug(sanitized);
   };
 
   return (
@@ -198,9 +229,9 @@ export default function ProfilePage() {
               </p>
               <div className="grid grid-cols-6 gap-3">
                 {AVATAR_OPTIONS.map((avatar) => {
-                  const optionUrl  = buildAvatarUrl(avatar.seed);
+                  const optionUrl = buildAvatarUrl(avatar.seed);
                   const isSelected = selectedAvatarUrl === optionUrl;
-                  const isSaving   = savingAvatarId === avatar.id;
+                  const isSaving = savingAvatarId === avatar.id;
                   return (
                     <button
                       key={avatar.id}
@@ -274,20 +305,95 @@ export default function ProfilePage() {
                           <Input
                             id="storeSlug"
                             value={storeSlug}
-                            onChange={(e) => setStoreSlug(e.target.value)}
+                            onChange={(e) => handleStoreSlugChange(e.target.value)}
                             placeholder="my-data-store"
                             required
-                            pattern="[a-z0-9-]+"
                             title="Only lowercase letters, numbers, and hyphens allowed"
                           />
                           <p className="text-xs text-muted-foreground mt-1">
                             Your store URL: {storeSlug ? `https://${process.env.NEXT_PUBLIC_STORE_DOMAIN || "bundles-store.vercel.app"}/store/${storeSlug}` : "/store/your-slug"}
                           </p>
                         </div>
+                        <div>
+                          <Label htmlFor="oneGbPrice">How much do you want to sell 1GB for? (GHS)</Label>
+                          <Input
+                            id="oneGbPrice"
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            value={oneGbPrice}
+                            onChange={(e) => setOneGbPrice(e.target.value)}
+                            placeholder="5.29"
+                            required
+                          />
+                          <p className="text-xs text-muted-foreground mt-1">
+                            This price will be used to calculate your profit margin automatically.
+                          </p>
+                        </div>
+                        <div>
+                          <Label htmlFor="storeDescription">Store Description (Optional)</Label>
+                          <Textarea
+                            id="storeDescription"
+                            value={storeDescription}
+                            onChange={(e) => setStoreDescription(e.target.value)}
+                            placeholder="We sell affordable Data Packages"
+                            rows={3}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="contactNumber">Contact Number (Optional)</Label>
+                          <Input
+                            id="contactNumber"
+                            value={contactNumber}
+                            onChange={(e) => setContactNumber(e.target.value)}
+                            placeholder="0595919802"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="whatsappLink">WhatsApp Link (Optional)</Label>
+                          <Input
+                            id="whatsappLink"
+                            value={whatsappLink}
+                            onChange={(e) => setWhatsappLink(e.target.value)}
+                            placeholder="https://wa.me/233595919802"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="storeThemeColor">Store Color (Optional)</Label>
+                          <div className="mt-2 flex items-center gap-2">
+                            <Input
+                              id="storeThemeColor"
+                              type="color"
+                              value={storeThemeColor}
+                              onChange={(e) => setStoreThemeColor(e.target.value)}
+                              className="h-10 w-16 p-1"
+                            />
+                            <Input
+                              value={storeThemeColor}
+                              onChange={(e) => setStoreThemeColor(e.target.value)}
+                              placeholder="#000000"
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <Label htmlFor="storeLogo">Store Logo (Optional)</Label>
+                          <Input
+                            id="storeLogo"
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => setStoreLogoFile(e.target.files?.[0] ?? null)}
+                            className="mt-2"
+                          />
+                          {storeLogoFile ? (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Selected: {storeLogoFile.name}
+                            </p>
+                          ) : null}
+                        </div>
                         <div className="flex gap-2 justify-end">
                           <Button
                             type="button"
-                            variant="outline"
+                            className="bg-transparent border border-input hover:bg-accent hover:text-accent-foreground"
                             onClick={() => setStoreModalOpen(false)}
                           >
                             Cancel
@@ -327,7 +433,7 @@ export default function ProfilePage() {
                       <Button asChild className="w-full">
                         <a href="/reseller/dashboard">Store Dashboard</a>
                       </Button>
-                      <Button asChild className="w-full" variant="outline">
+                      <Button asChild className="w-full bg-transparent border border-input hover:bg-accent hover:text-accent-foreground">
                         <a href={`/store/${userProfile.reseller_slug}`}>Visit My Store</a>
                       </Button>
                     </div>
@@ -367,7 +473,10 @@ export default function ProfilePage() {
               <p className="text-xs text-muted-foreground mt-0.5 mb-2">
                 Log out of your account on this device.
               </p>
-              <Button variant="outline" onClick={logout}>
+              <Button
+                className="bg-transparent border border-input hover:bg-accent hover:text-accent-foreground"
+                onClick={logout}
+              >
                 Log out
               </Button>
             </div>

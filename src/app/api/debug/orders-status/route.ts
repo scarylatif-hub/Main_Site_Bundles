@@ -40,12 +40,12 @@ export async function GET(req: NextRequest) {
   try {
     // Stage 1: Raw API call
     result.stages["1_raw_api_call"] = {
-      label: "Direct DataKazina API call",
-      call: "datakazinaAPI.fetchTransactions()",
-      endpoint: process.env.DATAKAZINA_MAIN_BASE_URL || "Not configured",
+      label: "Direct provider API call",
+      call: "providerAPI.fetchTransactions()",
+      endpoint: process.env.DATAKAZINA_MAIN_BASE_URL ? "Configured" : "Not configured",
     };
 
-    console.log("[debug/orders-status] Stage 1: Fetching from DataKazina...");
+    console.log("[debug/orders-status] Stage 1: Fetching from provider...");
     const apiResult = await datakazinaAPI.fetchTransactions();
 
     result.stages["1_raw_api_call"] = {

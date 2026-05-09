@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { Providers } from '@/components/providers';
 import { SiteChrome } from '@/components/site-chrome';
 import { Toaster } from '@/components/ui/toaster';
+import { MaintenanceBanner } from '@/components/maintenance-banner';
 
 export const metadata: Metadata = {
   title: 'SB Bundles - Affordable Data Bundles',
@@ -26,6 +27,7 @@ export default function RootLayout({
       </head>
       <body className={cn('min-h-screen bg-background font-body antialiased')}>
         <Providers>
+          <MaintenanceBanner />
           <SiteChrome>{children}</SiteChrome>
           <Toaster />
         </Providers>

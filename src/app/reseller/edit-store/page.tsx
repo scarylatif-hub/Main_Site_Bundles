@@ -39,7 +39,7 @@ export default function EditStorePage() {
     if (userProfile) {
       setStoreName(userProfile.store_name || "");
       setDescription(userProfile.store_description || "We sell affordable Data Packages");
-      setThemeColor(userProfile.theme_color || "#000000");
+      setThemeColor(userProfile.store_theme_color || "#000000");
       setContactNumber(userProfile.contact_number || "");
       setWhatsappLink(userProfile.whatsapp_link || "");
     }
@@ -154,11 +154,11 @@ export default function EditStorePage() {
             {/* Store Logo */}
             <div>
               <Label htmlFor="logo">Store Logo</Label>
-              {userProfile?.store_logo && (
+              {userProfile?.store_logo_url && (
                 <div className="mt-2">
                   <p className="text-sm text-muted-foreground mb-2">Current Logo</p>
                   <img
-                    src={userProfile.store_logo}
+                    src={userProfile.store_logo_url}
                     alt="Current store logo"
                     className="h-20 w-20 rounded-md border object-contain bg-white"
                   />

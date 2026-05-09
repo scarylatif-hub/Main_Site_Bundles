@@ -226,32 +226,22 @@ function extractOrdersArray(data: unknown): unknown[] | null {
  */
 export async function fetchExternalAllOrdersRaw(): Promise<unknown[]> {
   try {
-    console.log("external-all-orders: Starting fetch from DataKazina...");
     const result = await datakazinaAPI.fetchTransactions();
-    
-    console.log("external-all-orders: Fetch result:", {
-      ok: result.ok,
-      status: result.status,
-      hasData: !!result.data,
-      dataType: typeof result.data,
-      isArray: Array.isArray(result.data),
-      rawLength: result.rawText?.length
-    });
-    
+
     if (!result.ok || !result.data) {
-      console.warn("external-all-orders: DataKazina fetch failed", result.rawText);
+      // 404 with "No active transactions found." is an expected empty-state from provider.
+      if (result.status === 404) {
+        return [];
+      }
+      console.warn("external-all-orders: Provider fetch failed", {
+        status: result.status,
+      });
       return [];
     }
 
     const arr = extractOrdersArray(result.data);
-    console.log("external-all-orders: Extracted array:", {
-      isArray: Array.isArray(arr),
-      length: arr?.length,
-      sampleItem: arr?.[0]
-    });
-    
     if (arr) return arr;
-    console.warn("external-all-orders: unexpected shape", typeof result.data);
+    console.warn("external-all-orders: unexpected provider response shape");
     return [];
   } catch (e) {
     console.error("external-all-orders fetch error", e);
@@ -302,20 +292,12 @@ export function normalizeExternalOrder(
   const rawNet = parseNum(pick(o, ["network_id", "networkId"]));
   let network_id: number | null = null;
   
-  console.log("Network mapping debug:", {
-    rawNet,
-    network_label,
-    parsedRawNet: rawNet != null && Number.isFinite(rawNet) ? Math.trunc(rawNet) : null
-  });
-  
   if (rawNet != null && Number.isFinite(rawNet)) {
     const displayId = datakazinaNetworkIdToDisplay(Math.trunc(rawNet));
     network_id = displayId;
-    console.log("Network ID from raw number:", rawNet, "→", displayId);
   } else {
     const labelId = networkIdFromLabel(network_label);
     network_id = labelId;
-    console.log("Network ID from label:", network_label, "→", labelId);
   }
 
   const volVal = pick(o, [
