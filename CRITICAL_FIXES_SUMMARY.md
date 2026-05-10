@@ -8,7 +8,7 @@
 - Track transferred amounts in `earnings_to_wallet_transfers` table
 - Calculate available earnings: `total - transferred - withdrawn`
 - Added atomic transaction with rollback on failure
-
+-so i am 
 ### 2. 📊 Order Table - FIXED  
 **Problem:** Only showing store orders, not main site orders
 **Solution:** Orders page already fetches both sources:
