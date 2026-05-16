@@ -31,7 +31,7 @@ export default function ForgotPasswordPage() {
 
     // redirectTo must match exactly what's in Supabase → Auth → Redirect URLs
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: "https://sbbundles-main.vercel.app/reset-password",
+      redirectTo: "http://localhost:9002/reset-password",
     });
 
     setLoading(false);
