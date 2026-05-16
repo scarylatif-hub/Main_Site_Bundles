@@ -3,7 +3,7 @@
 // src/app/reset-password/page.tsx
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ export default function ResetPasswordPage() {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState("");
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -29,36 +30,64 @@ export default function ResetPasswordPage() {
   );
 
   useEffect(() => {
-    // Supabase puts the recovery token in the URL hash
-    // e.g. /reset-password#access_token=xxx&type=recovery
-    // We listen for the PASSWORD_RECOVERY event which fires automatically
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (event === "PASSWORD_RECOVERY") {
-          // Session is established from the recovery link — ready to update password
-          setSessionReady(true);
-          setVerifying(false);
-        } else if (event === "SIGNED_IN" && session) {
-          setSessionReady(true);
-          setVerifying(false);
-        }
-      }
-    );
+    const verifyToken = async () => {
+      // Supabase sends either:
+      // A) token_hash + type as query params (PKCE flow) — newer
+      // B) access_token + type in the URL hash (implicit flow) — older
+      const tokenHash = searchParams.get("token_hash");
+      const type = searchParams.get("type");
 
-    // Fallback: check if there's already an active session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (tokenHash && type === "recovery") {
+        // PKCE flow — exchange token_hash for a session
+        const { error } = await supabase.auth.verifyOtp({
+          token_hash: tokenHash,
+          type: "recovery",
+        });
+
+        if (error) {
+          setError("This reset link is invalid or has expired.");
+          setVerifying(false);
+          return;
+        }
+
+        setSessionReady(true);
+        setVerifying(false);
+        return;
+      }
+
+      // Implicit flow — token is in the URL hash (#access_token=...&type=recovery)
+      // onAuthStateChange handles this automatically
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(
+        (event, session) => {
+          if (event === "PASSWORD_RECOVERY" || (event === "SIGNED_IN" && session)) {
+            setSessionReady(true);
+            setVerifying(false);
+          }
+        }
+      );
+
+      // Fallback: check existing session
+      const { data: { session } } = await supabase.auth.getSession();
       if (session) {
         setSessionReady(true);
         setVerifying(false);
-      } else {
-        // Give the onAuthStateChange listener 3 seconds to fire
-        setTimeout(() => {
-          setVerifying(false);
-        }, 3000);
+        subscription.unsubscribe();
+        return;
       }
-    });
 
-    return () => subscription.unsubscribe();
+      // If nothing fires within 4 seconds, show expired message
+      const timeout = setTimeout(() => {
+        setVerifying(false);
+        subscription.unsubscribe();
+      }, 4000);
+
+      return () => {
+        clearTimeout(timeout);
+        subscription.unsubscribe();
+      };
+    };
+
+    verifyToken();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -85,6 +114,8 @@ export default function ResetPasswordPage() {
       setError(error.message);
     } else {
       setSuccess(true);
+      // Sign out after password change and redirect to login
+      await supabase.auth.signOut();
       setTimeout(() => router.push("/login"), 3000);
     }
   };
@@ -99,7 +130,7 @@ export default function ResetPasswordPage() {
       <Card className="mt-8">
         <CardContent className="pt-6">
           {verifying ? (
-            <div className="flex flex-col items-center gap-3 py-6 text-muted-foreground">
+            <div className="flex flex-col items-center gap-3 py-8 text-muted-foreground">
               <Loader2 className="h-6 w-6 animate-spin" />
               <p className="text-sm">Verifying your reset link...</p>
             </div>
@@ -114,9 +145,9 @@ export default function ResetPasswordPage() {
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                This reset link is invalid or has expired. Please{" "}
+                This reset link is invalid or has expired.{" "}
                 <a href="/forgot-password" className="underline font-medium">
-                  request a new one
+                  Request a new one
                 </a>
                 .
               </AlertDescription>

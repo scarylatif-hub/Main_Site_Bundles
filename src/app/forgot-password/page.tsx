@@ -24,14 +24,14 @@ export default function ForgotPasswordPage() {
     setLoading(true);
     setError("");
 
-    // Use browser client — never import from @/lib/supabase/server in client components
     const supabase = createBrowserClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
 
+    // redirectTo must match exactly what's in Supabase → Auth → Redirect URLs
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo: "https://sbbundles-main.vercel.app/reset-password",
     });
 
     setLoading(false);
