@@ -201,6 +201,7 @@ function LoginForm() {
             Sign up
           </Link>
         </p>
+        <p><a href="/forgot-password">Forgot Password?</a></p>
       </CardFooter>
     </Card>
   );
