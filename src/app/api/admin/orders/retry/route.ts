@@ -10,7 +10,7 @@
  *  3. Resolve package from DataKazina
  *  4. Set order to "processing", call DataKazina with retry logic
  *  5. On success → mark "completed"
- *  6. On failure → mark "failed" with error detail
+ *  6. On failure → mark "failed" with error detaillll
  */
 
 import { NextRequest, NextResponse } from "next/server";
