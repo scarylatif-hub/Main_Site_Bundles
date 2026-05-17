@@ -21,6 +21,25 @@ function getHashParams() {
   return new URLSearchParams(window.location.hash.replace(/^#/, ""));
 }
 
+function getRecoveryAttemptKey(value: string) {
+  return `sb-password-recovery:${value}`;
+}
+
+async function waitForRecoverySession(attemptKey: string) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (sessionStorage.getItem(attemptKey) === "done") {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session) return session;
+    }
+
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
+  }
+
+  return null;
+}
+
 function ResetPasswordContent() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -59,10 +78,40 @@ function ResetPasswordContent() {
       const hashType = hashParams.get("type");
 
       if (code) {
+        const attemptKey = getRecoveryAttemptKey(code);
+        if (sessionStorage.getItem(attemptKey) === "pending") {
+          const session = await waitForRecoverySession(attemptKey);
+          if (session) {
+            markReady();
+          } else {
+            markInvalid("This reset link could not be verified. Please request a new one.");
+          }
+          if (active) setVerifying(false);
+          return;
+        }
+
+        if (sessionStorage.getItem(attemptKey) === "done") {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+
+          if (session) {
+            markReady();
+          } else {
+            markInvalid("This reset link was already opened. Please request a new one.");
+          }
+          if (active) setVerifying(false);
+          return;
+        }
+
+        sessionStorage.setItem(attemptKey, "pending");
         const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (error) {
-          markInvalid("This reset link is invalid or has expired. Please request a new one.");
+          console.error("Password reset code exchange error:", error);
+          sessionStorage.removeItem(attemptKey);
+          markInvalid(error.message || "This reset link is invalid or has expired. Please request a new one.");
         } else {
+          sessionStorage.setItem(attemptKey, "done");
           markReady();
         }
         if (active) setVerifying(false);
@@ -70,15 +119,44 @@ function ResetPasswordContent() {
       }
 
       if (tokenHash && type === "recovery") {
+        const attemptKey = getRecoveryAttemptKey(tokenHash);
+        if (sessionStorage.getItem(attemptKey) === "pending") {
+          const session = await waitForRecoverySession(attemptKey);
+          if (session) {
+            markReady();
+          } else {
+            markInvalid("This reset link could not be verified. Please request a new one.");
+          }
+          if (active) setVerifying(false);
+          return;
+        }
+
+        if (sessionStorage.getItem(attemptKey) === "done") {
+          const {
+            data: { session },
+          } = await supabase.auth.getSession();
+
+          if (session) {
+            markReady();
+          } else {
+            markInvalid("This reset link was already opened. Please request a new one.");
+          }
+          if (active) setVerifying(false);
+          return;
+        }
+
+        sessionStorage.setItem(attemptKey, "pending");
         const { data, error } = await supabase.auth.verifyOtp({
           token_hash: tokenHash,
           type: "recovery",
         });
 
         if (error || !data.session) {
-          markInvalid("This reset link is invalid or has expired. Please request a new one.");
+          console.error("Password reset token verification error:", error);
+          sessionStorage.removeItem(attemptKey);
+          markInvalid(error?.message || "This reset link is invalid or has expired. Please request a new one.");
         } else {
-          await supabase.auth.setSession(data.session);
+          sessionStorage.setItem(attemptKey, "done");
           markReady();
         }
         if (active) setVerifying(false);
@@ -86,14 +164,36 @@ function ResetPasswordContent() {
       }
 
       if (accessToken && refreshToken && (!hashType || hashType === "recovery")) {
+        const attemptKey = getRecoveryAttemptKey(accessToken);
+        if (sessionStorage.getItem(attemptKey) === "pending") {
+          const session = await waitForRecoverySession(attemptKey);
+          if (session) {
+            markReady();
+          } else {
+            markInvalid("This reset link could not be verified. Please request a new one.");
+          }
+          if (active) setVerifying(false);
+          return;
+        }
+
+        if (sessionStorage.getItem(attemptKey) === "done") {
+          markReady();
+          if (active) setVerifying(false);
+          return;
+        }
+
+        sessionStorage.setItem(attemptKey, "pending");
         const { error } = await supabase.auth.setSession({
           access_token: accessToken,
           refresh_token: refreshToken,
         });
 
         if (error) {
-          markInvalid("This reset link is invalid or has expired. Please request a new one.");
+          console.error("Password reset session set error:", error);
+          sessionStorage.removeItem(attemptKey);
+          markInvalid(error.message || "This reset link is invalid or has expired. Please request a new one.");
         } else {
+          sessionStorage.setItem(attemptKey, "done");
           markReady();
         }
         if (active) setVerifying(false);
