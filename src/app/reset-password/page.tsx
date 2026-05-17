@@ -20,6 +20,7 @@ export default function ResetPasswordPage() {
   const [verifying, setVerifying] = useState(true);
   const [sessionReady, setSessionReady] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [sessionError, setSessionError] = useState("");
   const [error, setError] = useState("");
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -50,12 +51,12 @@ export default function ResetPasswordPage() {
           return;
         }
 
-        const { error } = await supabase.auth.setSession({
+        const { error: sessionError } = await supabase.auth.setSession({
           access_token: tokenHash,
           refresh_token: tokenHash,
         });
 
-        if (error) {
+        if (sessionError) {
           setError("Invalid or expired token. Please request a new password reset.");
         } else {
           setSessionReady(true);
@@ -133,10 +134,10 @@ export default function ResetPasswordPage() {
             </Alert>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
-              {error && (
+              {sessionError && (
                 <Alert variant="destructive">
                   <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>{error}</AlertDescription>
+                  <AlertDescription>{sessionError}</AlertDescription>
                 </Alert>
               )}
               <div className="space-y-2">
