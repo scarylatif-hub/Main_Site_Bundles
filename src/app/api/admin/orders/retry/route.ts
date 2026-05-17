@@ -10,7 +10,7 @@
  *  3. Resolve package from DataKazina
  *  4. Set order to "processing", call DataKazina with retry logic
  *  5. On success → mark "completed"
- *  6. On failure → mark "failed" with error detaillll
+ *  6. On failure → mark "failed" with error detail
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -141,6 +141,7 @@ export async function POST(req: NextRequest) {
   }
 
   const providerCode =
+    deliveryResult.data.order_code ??
     deliveryResult.data.transaction_code ??
     deliveryResult.data.reference ??
     retryRef;
