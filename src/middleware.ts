@@ -17,7 +17,7 @@ function withPersistentCookieOptions(options: CookieOptions): CookieOptions {
 }
 
 /** Pages that should redirect AWAY if user is logged in */
-const AUTH_PATHS = new Set(["/login", "/signup", "/forgot-password"]);
+const AUTH_PATHS = new Set(["/login", "/signup", "/forgot-password", "/reset-password"]);
 
 /** Public pages that are always accessible */
 function isPublicPath(pathname: string) {
@@ -33,7 +33,8 @@ function isAuthPath(pathname: string) {
   return (
     pathname.startsWith("/login/") ||
     pathname.startsWith("/signup/") ||
-    pathname.startsWith("/forgot-password/")
+    pathname.startsWith("/forgot-password/") ||
+    pathname.startsWith("/reset-password/")
   );
 }
 
