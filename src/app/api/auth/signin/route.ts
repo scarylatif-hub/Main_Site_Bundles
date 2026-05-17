@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient } from "@supabase/supabase-js";
 
-const AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365; // 1 year
+const AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 400; // Browser max is about 400 days
 
 function withPersistentCookieOptions(options: CookieOptions): CookieOptions {
   if (options.maxAge === 0) {
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
     const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-    const res = NextResponse.json({ success: true });
+    const cookieResponse = NextResponse.json({ success: true });
 
     const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
       cookies: {
@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
         },
         setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
           cookiesToSet.forEach(({ name, value, options }) =>
-            res.cookies.set(name, value, withPersistentCookieOptions(options))
+            cookieResponse.cookies.set(name, value, withPersistentCookieOptions(options))
           );
         },
       },
@@ -93,7 +93,12 @@ export async function POST(request: NextRequest) {
       ]);
     }
 
-    return res;
+    const finalResponse = NextResponse.json({ success: true });
+    cookieResponse.cookies.getAll().forEach((cookie) => {
+      finalResponse.cookies.set(cookie);
+    });
+
+    return finalResponse;
   } catch (error: unknown) {
     console.error("Error in POST /api/auth/signin:", error);
     const message =

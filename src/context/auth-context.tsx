@@ -247,28 +247,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [syncSession]);
 
   const logout = useCallback(async () => {
-    setLoading(true);
+    setLoading(false);
+    setUser(null);
+    setUserProfile(null);
+    setSession(null);
+    profileCache.clear();
+    router.replace("/login");
 
     try {
-      // Clear server-managed auth cookies first.
-      await fetch("/api/auth/signout", {
-        method: "POST",
-        credentials: "include",
-      });
-      await supabase.auth.signOut();
-
-      // Clear local state immediately
-      setUser(null);
-      setUserProfile(null);
-      setSession(null);
-      profileCache.clear();
-
-      // Redirect immediately
-      router.push("/login");
+      await Promise.allSettled([
+        supabase.auth.signOut(),
+        fetch("/api/auth/signout", {
+          method: "POST",
+          credentials: "include",
+        }),
+      ]);
       router.refresh();
     } catch (error) {
       console.error("logout error:", error);
-      setLoading(false);
+      router.refresh();
     }
   }, [router]);
 

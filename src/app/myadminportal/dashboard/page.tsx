@@ -27,6 +27,7 @@ export type SeriesPoint = {
   label: string;
   revenue: number;
   orders: number;
+  profit: number;
 };
 
 type DbPurchaseRow = {
@@ -269,7 +270,7 @@ export default async function MyAdminDashboardPage() {
     const d = new Date(now);
     d.setHours(h, 0, 0, 0);
     const label = fmtHour(d);
-    dailyMap.set(label, { label, revenue: 0, orders: 0 });
+    dailyMap.set(label, { label, revenue: 0, orders: 0, profit: 0 });
   }
 
   const monthlyMap = new Map<string, SeriesPoint>();
@@ -278,7 +279,7 @@ export default async function MyAdminDashboardPage() {
     d.setDate(d.getDate() - i);
     d.setHours(0, 0, 0, 0);
     const label = fmtDay(d);
-    monthlyMap.set(label, { label, revenue: 0, orders: 0 });
+    monthlyMap.set(label, { label, revenue: 0, orders: 0, profit: 0 });
   }
 
   const weeklyMap = new Map<string, SeriesPoint>();
@@ -287,7 +288,7 @@ export default async function MyAdminDashboardPage() {
     d.setDate(d.getDate() - i * 7);
     const label = weekLabel(d);
     if (!weeklyMap.has(label)) {
-      weeklyMap.set(label, { label, revenue: 0, orders: 0 });
+      weeklyMap.set(label, { label, revenue: 0, orders: 0, profit: 0 });
     }
   }
 
@@ -295,7 +296,7 @@ export default async function MyAdminDashboardPage() {
   for (let i = 11; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const label = fmtMonth(d);
-    yearlyMap.set(label, { label, revenue: 0, orders: 0 });
+    yearlyMap.set(label, { label, revenue: 0, orders: 0, profit: 0 });
   }
 
   for (const row of rows) {
@@ -305,6 +306,7 @@ export default async function MyAdminDashboardPage() {
 
     const d = new Date(row.created_at);
     const amt = Math.abs(Number(row.amount));
+    const orderProfit = amt * (1 - 1 / m);
 
     const isToday =
       d.getFullYear() === now.getFullYear() &&
@@ -316,6 +318,7 @@ export default async function MyAdminDashboardPage() {
       if (slot) {
         slot.revenue += amt;
         slot.orders += 1;
+        slot.profit += orderProfit;
       }
     }
 
@@ -323,18 +326,21 @@ export default async function MyAdminDashboardPage() {
     if (dSlot) {
       dSlot.revenue += amt;
       dSlot.orders += 1;
+      dSlot.profit += orderProfit;
     }
 
     const wSlot = weeklyMap.get(weekLabel(d));
     if (wSlot) {
       wSlot.revenue += amt;
       wSlot.orders += 1;
+      wSlot.profit += orderProfit;
     }
 
     const ySlot = yearlyMap.get(fmtMonth(d));
     if (ySlot) {
       ySlot.revenue += amt;
       ySlot.orders += 1;
+      ySlot.profit += orderProfit;
     }
   }
 

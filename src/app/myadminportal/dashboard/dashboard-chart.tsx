@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import type { SeriesPoint } from "./page";
 
 type Mode   = "daily" | "monthly" | "weekly" | "yearly";
-type Metric = "revenue" | "orders";
+type Metric = "revenue" | "orders" | "profit";
 
 const MODES: { key: Mode; label: string }[] = [
   { key: "daily",   label: "Today" },
@@ -30,7 +30,20 @@ export function DashboardChart({ daily, monthly, weekly, yearly }: Props) {
 
   const datasets: Record<Mode, SeriesPoint[]> = { daily, monthly, weekly, yearly };
   const pts   = datasets[mode];
-  const total = pts.reduce((s, d) => s + (metric === "revenue" ? d.revenue : d.orders), 0);
+  const total = pts.reduce((s, d) => {
+    if (metric === "revenue") return s + d.revenue;
+    if (metric === "profit") return s + d.profit;
+    return s + d.orders;
+  }, 0);
+
+  const totalLabel =
+    metric === "revenue"
+      ? "Revenue GHS"
+      : metric === "profit"
+        ? mode === "daily"
+          ? "Profit"
+          : "Profit GHS"
+        : "Total orders";
 
   useEffect(() => {
     let cancelled = false;
@@ -51,7 +64,11 @@ export function DashboardChart({ daily, monthly, weekly, yearly }: Props) {
       const tooltipFg  = isDark ? "#f1f5f9" : "#0f172a";
       const tooltipSub = isDark ? "#94a3b8" : "#64748b";
 
-      const values = pts.map((d) => metric === "revenue" ? d.revenue : d.orders);
+      const values = pts.map((d) => {
+        if (metric === "revenue") return d.revenue;
+        if (metric === "profit") return d.profit;
+        return d.orders;
+      });
 
       chartRef.current = new Chart(canvasRef.current!, {
         type: "bar",
@@ -95,12 +112,21 @@ export function DashboardChart({ daily, monthly, weekly, yearly }: Props) {
                   if (metric === "revenue") {
                     return [
                       `Revenue:  GHS ${p.revenue.toFixed(2)}`,
+                      `Profit:   GHS ${p.profit.toFixed(2)}`,
+                      `Orders:   ${p.orders}`,
+                    ] as unknown as string;
+                  }
+                  if (metric === "profit") {
+                    return [
+                      `Profit:   GHS ${p.profit.toFixed(2)}`,
+                      `Revenue:  GHS ${p.revenue.toFixed(2)}`,
                       `Orders:   ${p.orders}`,
                     ] as unknown as string;
                   }
                   return [
                     `Orders:   ${p.orders}`,
                     `Revenue:  GHS ${p.revenue.toFixed(2)}`,
+                    `Profit:   GHS ${p.profit.toFixed(2)}`,
                   ] as unknown as string;
                 },
               },
@@ -128,6 +154,9 @@ export function DashboardChart({ daily, monthly, weekly, yearly }: Props) {
                 callback: (v) => {
                   const n = Number(v);
                   if (metric === "orders") return Number.isInteger(n) ? String(n) : "";
+                  if (metric === "profit" || metric === "revenue") {
+                    return n === 0 ? "0" : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+                  }
                   return n === 0 ? "0" : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
                 },
               },
@@ -197,19 +226,29 @@ export function DashboardChart({ daily, monthly, weekly, yearly }: Props) {
               >
                 Orders
               </button>
+              <button
+                type="button"
+                onClick={() => setMetric("profit")}
+                className={cn(
+                  "rounded px-3 py-1 text-xs font-medium transition-colors",
+                  metric === "profit"
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Today&apos;s profit
+              </button>
             </div>
 
             <div className="text-right">
-              <p className="text-xs text-muted-foreground">
-                {metric === "revenue" ? "Revenue GHS" : "Total orders"}
-              </p>
+              <p className="text-xs text-muted-foreground">{totalLabel}</p>
               <p className="text-2xl font-semibold tabular-nums text-foreground">
-                {metric === "revenue"
-                  ? total.toLocaleString("en-GH", {
+                {metric === "orders"
+                  ? Math.round(total).toLocaleString("en-GH")
+                  : total.toLocaleString("en-GH", {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
-                    })
-                  : Math.round(total).toLocaleString("en-GH")}
+                    })}
               </p>
             </div>
           </div>

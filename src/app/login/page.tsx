@@ -25,8 +25,9 @@ import {
 import Link from "next/link";
 import { Suspense, useEffect, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { sanitizeSearchParamsString } from "@/lib/sanitize-auth-search-params";
+import { useAuth } from "@/context/auth-context";
 
 const FormSchema = z.object({
   email: z.string().email({ message: "Please enter a valid email address." }),
@@ -36,7 +37,7 @@ const FormSchema = z.object({
 function LoginForm() {
   const { toast } = useToast();
   const searchParams = useSearchParams();
-  const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -54,12 +55,26 @@ function LoginForm() {
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    if (authLoading || !user) return;
+    const target = safeNextPath();
+    window.location.replace(target);
+  }, [authLoading, user, searchParams]);
+
   function safeNextPath(): string {
     const raw = searchParams.get("next");
     if (raw && raw.startsWith("/") && !raw.startsWith("//")) {
       return raw;
     }
     return "/";
+  }
+
+  if (!authLoading && user) {
+    return (
+      <Card className="w-full max-w-md p-8 text-center text-muted-foreground">
+        Redirecting…
+      </Card>
+    );
   }
 
   async function onSubmit(data: z.infer<typeof FormSchema>) {
@@ -94,9 +109,7 @@ function LoginForm() {
         );
       }
 
-      // Session cookies were set on this response by the API route — no client setSession
-      // (prevents Supabase navigator.locks races with AuthProvider).
-      router.push(safeNextPath());
+      window.location.assign(safeNextPath());
     } catch (error: unknown) {
       console.error("Login Error:", error);
       toast({

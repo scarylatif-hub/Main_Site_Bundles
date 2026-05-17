@@ -1,13 +1,15 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { isAdminEmail } from "@/lib/admin-config";
+import { isMainSiteOnlyPath, isStoreDeployment } from "@/lib/app-config";
 
-const AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365; // 1 year
+const AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 400;
 
 function withPersistentCookieOptions(options: CookieOptions): CookieOptions {
   if (options.maxAge === 0) {
     return options;
   }
+
   return {
     ...options,
     maxAge: AUTH_COOKIE_MAX_AGE_SECONDS,
@@ -16,18 +18,17 @@ function withPersistentCookieOptions(options: CookieOptions): CookieOptions {
   };
 }
 
-/** Pages that should redirect AWAY if user is logged in */
-const AUTH_PATHS = new Set(["/login", "/signup", "/forgot-password", "/reset-password"]);
+const AUTH_PATHS = new Set([
+  "/login",
+  "/signup",
+  "/forgot-password",
+  "/reset-password",
+]);
 
-/** Public pages that are always accessible */
 function isPublicPath(pathname: string) {
-  return (
-    pathname === "/store" ||
-    pathname.startsWith("/store/")
-  );
+  return pathname === "/store" || pathname.startsWith("/store/");
 }
 
-/** Auth-only pages (login/signup/etc) */
 function isAuthPath(pathname: string) {
   if (AUTH_PATHS.has(pathname)) return true;
   return (
@@ -38,7 +39,22 @@ function isAuthPath(pathname: string) {
   );
 }
 
+function safeNextPath(request: NextRequest): string {
+  const raw = request.nextUrl.searchParams.get("next");
+  if (raw && raw.startsWith("/") && !raw.startsWith("//")) {
+    return raw;
+  }
+  return "/";
+}
+
 export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  const host = request.headers.get("host") ?? request.nextUrl.hostname;
+
+  if (pathname.startsWith("/api")) {
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -51,7 +67,7 @@ export async function middleware(request: NextRequest) {
         },
         setAll(cookiesToSet) {
           cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value),
+            request.cookies.set(name, value)
           );
           supabaseResponse = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
@@ -59,38 +75,43 @@ export async function middleware(request: NextRequest) {
               name,
               value,
               withPersistentCookieOptions(options)
-            ),
+            )
           );
         },
       },
-    },
+    }
   );
 
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { pathname } = request.nextUrl;
+  const storeDeployment = isStoreDeployment(host);
 
-  // 1. API routes — always pass through
-  if (pathname.startsWith("/api")) {
-    return supabaseResponse;
+  if (storeDeployment && isMainSiteOnlyPath(pathname)) {
+    if (pathname === "/") {
+      return NextResponse.rewrite(new URL("/not-found", request.url));
+    }
+    const url = request.nextUrl.clone();
+    url.pathname = "/store";
+    url.search = "";
+    return NextResponse.redirect(url);
   }
 
-  // 2. Auth pages — redirect logged-in users to home
   if (isAuthPath(pathname)) {
     if (user) {
-      return NextResponse.redirect(new URL("/", request.url));
+      const url = request.nextUrl.clone();
+      url.pathname = safeNextPath(request);
+      url.search = "";
+      return NextResponse.redirect(url);
     }
     return supabaseResponse;
   }
 
-  // 3. Public pages (like /store) — ALWAYS accessible
   if (isPublicPath(pathname)) {
     return supabaseResponse;
   }
 
-  // 4. No session — redirect to login
   if (!user) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
@@ -98,14 +119,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // 5. Admin routes
-  if (pathname.startsWith("/myadminportal")) {
-    if (!isAdminEmail(user.email)) {
-      return NextResponse.redirect(new URL("/", request.url));
-    }
+  if (pathname.startsWith("/myadminportal") && !isAdminEmail(user.email)) {
+    return NextResponse.redirect(new URL("/", request.url));
   }
 
-  // 6. ყველაფერი okay — continue
   return supabaseResponse;
 }
 

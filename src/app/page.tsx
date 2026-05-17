@@ -1,6 +1,7 @@
-
 "use client";
 
+import { notFound } from "next/navigation";
+import { isStoreApp } from "@/lib/app-config";
 import React, { useState, useMemo, useEffect } from 'react';
 import { PhoneInputForm } from '@/components/phone-input-form';
 import type { NetworkName, Package } from '@/lib/definitions';
@@ -19,6 +20,10 @@ import { validatePhoneNumber } from '@/lib/networks';
 import { WalletDepositCard } from '@/components/wallet-deposit-card';
 
 export default function Home() {
+  if (isStoreApp) {
+    notFound();
+  }
+
   const { user } = useAuth();
   const { addToCart } = useCart();
   const { toast } = useToast();

@@ -91,20 +91,30 @@ export default function CheckoutPage() {
                     body: JSON.stringify({
                         recipientMsisdn: item.recipientMsisdn,
                         networkId: item.networkId,
+                        networkName: item.networkName,
                         sharedBundle: item.sharedBundle,
                         price: item.price,
-                        dataAmount: item.dataAmount
+                        dataAmount: item.dataAmount,
                     }),
                 });
 
-                let resultData: { error?: string; code?: string } = {};
+                let resultData: {
+                    success?: boolean;
+                    error?: string;
+                    code?: string;
+                    transaction_code?: string;
+                } = {};
                 try {
                     resultData = await response.json();
                 } catch {
                     resultData = { error: `Purchase failed (HTTP ${response.status})` };
                 }
 
-                if (!response.ok) {
+                const apiSuccess =
+                    response.ok &&
+                    (resultData.success === true || Boolean(resultData.transaction_code));
+
+                if (!apiSuccess) {
                     results.push({
                         item,
                         success: false,

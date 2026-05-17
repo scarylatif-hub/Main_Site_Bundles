@@ -14,8 +14,12 @@ import { createAdminClient }            from "@/lib/supabase/admin";
 import type { SupabaseClient }          from "@supabase/supabase-js";
 import { datakazinaAPI }                from "@/lib/datakazina";
 import { normalizePhoneNumber } from "@/lib/networks";
-import { displayNetworkIdToDatakazina } from "@/lib/network-id-map";
-import { notifyAdminBundlePurchase }    from "@/lib/server/notifications";
+import { extractDakazinaOrderCode } from "@/lib/dakazina-order-code";
+import {
+  displayNetworkIdToDatakazina,
+  resolveDisplayNetworkId,
+} from "@/lib/network-id-map";
+import { notifyAdminBundlePurchase } from "@/lib/server/notifications";
 
 // ntfy configuration
 const NTFY_TOPIC = process.env.NTFY_TOPIC || "bundle-ghana";
@@ -39,11 +43,11 @@ async function sendNtfyNotification(title: string, message: string) {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function abortPendingPurchase(
-  admin:          SupabaseClient,
-  userId:         string,
-  reference:      string,
-  restoreBalance: number,
-  reason:         string
+  admin:           SupabaseClient,
+  userId:          string,
+  transactionId:   string,
+  restoreBalance:  number,
+  reason:          string
 ): Promise<void> {
   console.error(`[buy-bundle][ABORT] ${reason}`);
   await Promise.all([
@@ -51,11 +55,7 @@ async function abortPendingPurchase(
       .from("profiles")
       .update({ wallet_balance: restoreBalance, updated_at: new Date().toISOString() })
       .eq("id", userId),
-    admin
-      .from("transactions")
-      .delete()
-      .eq("user_id", userId)
-      .eq("reference", reference),
+    admin.from("transactions").delete().eq("id", transactionId),
   ]);
 }
 
@@ -69,37 +69,6 @@ function isDuplicateOrConflict(httpStatus: number, rawText: string): boolean {
     t.includes("conflicting transaction") ||
     t.includes("couldn't place order")
   );
-}
-
-/**
- * Extract the best available transaction code from whatever DataKazina returns.
- * Since the response shape is undocumented we check every likely field name.
- */
-function extractProviderCode(data: Record<string, unknown>, fallback: string): string {
-  const candidates = [
-    "transaction_code",
-    "transactionCode",
-    "transaction_id",
-    "transactionId",
-    "reference",
-    "ref",
-    "order_id",
-    "orderId",
-    "id",
-  ];
-  for (const key of candidates) {
-    if (data[key] && String(data[key]).trim()) {
-      return String(data[key]).trim();
-    }
-  }
-  // DataKazina might nest under message or status objects
-  for (const val of Object.values(data)) {
-    if (typeof val === "string" && val.trim().length > 4) {
-      // Return first non-trivial string value as a last resort
-      return val.trim();
-    }
-  }
-  return fallback;
 }
 
 // ── Route handler ─────────────────────────────────────────────────────────────
@@ -122,9 +91,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { recipientMsisdn, networkId, sharedBundle, price, dataAmount } = body as {
+  const { recipientMsisdn, networkId, networkName, sharedBundle, price, dataAmount } = body as {
     recipientMsisdn?: unknown;
     networkId?:       unknown;
+    networkName?:     unknown;
     sharedBundle?:    unknown;
     price?:           unknown;
     dataAmount?:      unknown;
@@ -185,21 +155,31 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Could not update wallet" }, { status: 500 });
   }
 
-  const { error: insertErr } = await admin.from("transactions").insert({
-    user_id:          user.id,
-    reference,
-    transaction_code: reference,
-    status:           "pending",
-    transaction_type: "purchase",
-    amount:           -p,
-    recipient_msisdn,
-    network_id:       Number(networkId),
-    shared_bundle:    Number(sharedBundle),
-    bundle_amount:    dataAmount,
-    description,
+  const displayNetworkId = resolveDisplayNetworkId({
+    displayNetworkId: Number(networkId),
+    displayNetworkName:
+      networkName != null ? String(networkName) : undefined,
   });
 
-  if (insertErr) {
+  const { data: insertedRow, error: insertErr } = await admin
+    .from("transactions")
+    .insert({
+      user_id:          user.id,
+      reference,
+      transaction_code: reference,
+      status:           "pending",
+      transaction_type: "purchase",
+      amount:           -p,
+      recipient_msisdn,
+      network_id:       displayNetworkId,
+      shared_bundle:    Number(sharedBundle),
+      bundle_amount:    dataAmount,
+      description,
+    })
+    .select("id")
+    .single();
+
+  if (insertErr || !insertedRow) {
     console.error("[buy-bundle][STEP-4] Transaction insert failed:", {
       code: insertErr.code, message: insertErr.message,
     });
@@ -210,11 +190,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Could not create order record" }, { status: 500 });
   }
 
-  // Removed transaction logging to prevent exposing sensitive data in console
+  const transactionId = insertedRow.id;
 
-  // STEP 5 — Call DataKazina /buy-data-package
-  // Map display network ID to DataKazina network ID
-  const datakazinaNetworkId = displayNetworkIdToDatakazina(Number(networkId));
+  // STEP 5 — Call DataKazina /buy-data-package (main console)
+  const datakazinaNetworkId = displayNetworkIdToDatakazina(displayNetworkId);
   // Removed network ID mapping logging to prevent exposing internal logic
 
   const purchaseParams = {
@@ -226,7 +205,7 @@ export async function POST(req: NextRequest) {
   // removed parameter logging to prevent exposing API call details
 
   try {
-    const result = await datakazinaAPI.purchaseDataPackage(purchaseParams);
+    const result = await datakazinaAPI.purchaseDataPackage(purchaseParams, true);
 
     // Log the full raw response so we learn what DataKazina actually returns
     // Removed response logging to prevent exposing API responses in console
@@ -241,9 +220,11 @@ export async function POST(req: NextRequest) {
       if (isDupe) {
         await admin
           .from("transactions")
-          .update({ status: "placed", description: `${description} (duplicate acknowledged)` })
-          .eq("user_id", user.id)
-          .eq("reference", reference);
+          .update({
+            status: "processing",
+            description: `${description} (duplicate acknowledged)`,
+          })
+          .eq("id", transactionId);
 
         return NextResponse.json(
           { error: "Order already in progress. Check My Orders or wait a few minutes.", code: "ORDER_IN_PROGRESS" },
@@ -251,43 +232,34 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      await abortPendingPurchase(admin, user.id, reference, balanceBefore, result.rawText);
+      await abortPendingPurchase(admin, user.id, transactionId, balanceBefore, result.rawText);
       return NextResponse.json(
         { error: result.rawText || "Provider rejected the request", code: "PROVIDER_ERROR" },
         { status: result.status >= 400 ? result.status : 502 }
       );
     }
 
-    // STEP 6b — 2xx = success (response shape may vary)
-    const providerCode = extractProviderCode(
-      result.data as Record<string, unknown>,
-      reference // fallback to our own reference if DataKazina returns nothing useful
+    // STEP 6b — Provider accepted order; persist ORDER-xxx by transaction id
+    const providerCode = extractDakazinaOrderCode(
+      (result.data ?? {}) as Record<string, unknown>,
+      reference
     );
 
-  // Removed success logging to prevent exposing transaction codes
-
-    // Mark transaction as placed
     const patch = {
       reference:        providerCode,
       transaction_code: providerCode,
-      status:           "placed",
-      description,
+      status:           "processing",
+      description:      `${description} | api_ref:${reference}`,
     };
 
     const { error: updateErr } = await admin
       .from("transactions")
       .update(patch)
-      .eq("user_id", user.id)
-      .eq("reference", reference);
+      .eq("id", transactionId);
 
     if (updateErr) {
-      // Fallback: match by transaction_code in case reference already changed
-      // Removed error logging to prevent exposing sensitive database errors in console
-      await admin
-        .from("transactions")
-        .update(patch)
-        .eq("user_id", user.id)
-        .eq("transaction_code", reference);
+      console.error("[buy-bundle][STEP-6b] Transaction update failed:", updateErr);
+      // Provider already placed the order — do not fail checkout
     }
 
     void notifyAdminBundlePurchase({
@@ -295,11 +267,10 @@ export async function POST(req: NextRequest) {
       orderId:         providerCode,
       amountGhs:       p,
       dataAmount:      String(dataAmount),
-      networkId:       Number(networkId),
+      networkId:       displayNetworkId,
       recipientMsisdn: recipient_msisdn,
     });
 
-    // Send ntfy notification for successful main site purchase
     const ntfyMessage = `
 🛒 MAIN SITE PURCHASE COMPLETED
 ========================================
@@ -314,7 +285,7 @@ Transaction Code: ${providerCode}
 ⏰ Completed: ${new Date().toISOString()}
   `.trim();
 
-    await sendNtfyNotification(
+    void sendNtfyNotification(
       `🛒 Purchase: GHS ${p.toFixed(2)} - User ${user.id}`,
       ntfyMessage
     );
@@ -323,12 +294,13 @@ Transaction Code: ${providerCode}
       success:          true,
       transaction_code: providerCode,
       reference:        providerCode,
+      local_reference:  reference,
     });
 
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[buy-bundle][STEP-5] Unhandled exception:", msg);
-    await abortPendingPurchase(admin, user.id, reference, balanceBefore, msg);
+    await abortPendingPurchase(admin, user.id, transactionId, balanceBefore, msg);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

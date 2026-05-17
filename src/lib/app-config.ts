@@ -12,7 +12,40 @@ export const isMainApp = APP_MODE === "main";
 export const isStoreApp = APP_MODE === "store";
 
 // Store domain configuration
-export const STORE_DOMAIN = process.env.NEXT_PUBLIC_STORE_DOMAIN || "storebundles.vercel.app";
+export const STORE_DOMAIN =
+  process.env.NEXT_PUBLIC_STORE_DOMAIN || "bundles-store.vercel.app";
+
+const MAIN_SITE_ONLY_PREFIXES = [
+  "/checkout",
+  "/cart",
+  "/orders",
+  "/wallet",
+  "/profile",
+  "/reseller",
+  "/myadminportal",
+] as const;
+
+/** True when this deployment is the store-only site (env or store hostname). */
+export function isStoreDeployment(host?: string): boolean {
+  if (APP_MODE === "store") return true;
+  if (APP_MODE === "main") return false;
+
+  const normalizedHost = (host ?? "").toLowerCase().split(":")[0];
+  const storeHost = STORE_DOMAIN.toLowerCase().split(":")[0];
+  return (
+    normalizedHost === storeHost ||
+    normalizedHost.endsWith(`.${storeHost}`)
+  );
+}
+
+/** Consumer main-site routes that must not appear on the store deployment. */
+export function isMainSiteOnlyPath(pathname: string): boolean {
+  const path = pathname.split("?")[0];
+  if (path === "/") return true;
+  return MAIN_SITE_ONLY_PREFIXES.some(
+    (prefix) => path === prefix || path.startsWith(`${prefix}/`)
+  );
+}
 
 // Generate store URL based on app mode
 export function getStoreUrl(resellerSlug: string): string {
