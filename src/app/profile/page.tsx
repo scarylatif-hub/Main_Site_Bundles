@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/context/auth-context";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { AVATAR_OPTIONS, buildAvatarUrl } from "@/lib/avatars";
 import type { Profile } from "@/lib/definitions";
@@ -31,6 +31,7 @@ import { Textarea } from "@/components/ui/textarea";
 export default function ProfilePage() {
   const { user, userProfile, loading, logout, refreshUser } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [localProfile, setLocalProfile] = useState<Profile | null>(null);
   const [savingAvatarId, setSavingAvatarId] = useState<string | null>(null);
@@ -58,6 +59,16 @@ export default function ProfilePage() {
       router.push("/login");
     }
   }, [user, loading, router]);
+
+  useEffect(() => {
+    if (loading || !user || userProfile?.is_reseller) {
+      return;
+    }
+
+    if (searchParams.get("createStore") === "1") {
+      setStoreModalOpen(true);
+    }
+  }, [loading, searchParams, user, userProfile?.is_reseller]);
 
   const avatarUrl = useMemo(
     () => localProfile?.avatar_url ?? buildAvatarUrl("default"),

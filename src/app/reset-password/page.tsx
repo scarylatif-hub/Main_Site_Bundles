@@ -2,9 +2,9 @@
 
 // src/app/reset-password/page.tsx
 
-import { useState, useEffect, Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createBrowserClient } from "@supabase/ssr";
+import { supabase } from "@/lib/supabase/client";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,14 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CheckCircle, AlertCircle, Loader2 } from "lucide-react";
 
+function getHashParams() {
+  if (typeof window === "undefined" || !window.location.hash) {
+    return new URLSearchParams();
+  }
+
+  return new URLSearchParams(window.location.hash.replace(/^#/, ""));
+}
+
 function ResetPasswordContent() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -20,55 +28,97 @@ function ResetPasswordContent() {
   const [verifying, setVerifying] = useState(true);
   const [sessionReady, setSessionReady] = useState(false);
   const [success, setSuccess] = useState(false);
-  const [sessionError, setSessionError] = useState("");
   const [error, setError] = useState("");
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-
   useEffect(() => {
-    const verifyToken = async () => {
-      // Supabase sends either:
-      // A) token_hash + type as query params (PKCE flow) — newer
-      // B) access_token + type in the URL hash (implicit flow) — older
+    let active = true;
+
+    const markReady = () => {
+      if (!active) return;
+      setSessionReady(true);
+      setError("");
+    };
+
+    const markInvalid = (message: string) => {
+      if (!active) return;
+      setSessionReady(false);
+      setError(message);
+    };
+
+    const verifyResetLink = async () => {
+      setVerifying(true);
+
+      const code = searchParams.get("code");
       const tokenHash = searchParams.get("token_hash");
       const type = searchParams.get("type");
+      const hashParams = getHashParams();
+      const accessToken = hashParams.get("access_token");
+      const refreshToken = hashParams.get("refresh_token");
+      const hashType = hashParams.get("type");
+
+      if (code) {
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) {
+          markInvalid("This reset link is invalid or has expired. Please request a new one.");
+        } else {
+          markReady();
+        }
+        if (active) setVerifying(false);
+        return;
+      }
 
       if (tokenHash && type === "recovery") {
-        // PKCE flow — exchange token_hash for a session
-        const { error } = await supabase.auth.verifyOtp({
+        const { data, error } = await supabase.auth.verifyOtp({
           token_hash: tokenHash,
           type: "recovery",
         });
 
-        if (error) {
-          setError("This reset link is invalid or has expired.");
-          setVerifying(false);
-          return;
+        if (error || !data.session) {
+          markInvalid("This reset link is invalid or has expired. Please request a new one.");
+        } else {
+          await supabase.auth.setSession(data.session);
+          markReady();
         }
+        if (active) setVerifying(false);
+        return;
+      }
 
-        const { error: sessionError } = await supabase.auth.setSession({
-          access_token: tokenHash,
-          refresh_token: tokenHash,
+      if (accessToken && refreshToken && (!hashType || hashType === "recovery")) {
+        const { error } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
         });
 
-        if (sessionError) {
-          setError("Invalid or expired token. Please request a new password reset.");
+        if (error) {
+          markInvalid("This reset link is invalid or has expired. Please request a new one.");
         } else {
-          setSessionReady(true);
+          markReady();
         }
-      } else {
-        setError("Invalid reset link. Please check your email or request a new one.");
+        if (active) setVerifying(false);
+        return;
       }
-      setVerifying(false);
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (session) {
+        markReady();
+      } else {
+        markInvalid("Invalid reset link. Please check your email or request a new one.");
+      }
+
+      if (active) setVerifying(false);
     };
 
-    verifyToken();
-  }, []);
+    void verifyResetLink();
+
+    return () => {
+      active = false;
+    };
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,12 +142,12 @@ function ResetPasswordContent() {
 
     if (error) {
       setError(error.message);
-    } else {
-      setSuccess(true);
-      // Sign out after password change and redirect to login
-      await supabase.auth.signOut();
-      setTimeout(() => router.push("/login"), 3000);
+      return;
     }
+
+    setSuccess(true);
+    await supabase.auth.signOut();
+    setTimeout(() => router.push("/login"), 3000);
   };
 
   return (
@@ -118,14 +168,14 @@ function ResetPasswordContent() {
             <Alert className="bg-success/10 border-success/30">
               <CheckCircle className="h-4 w-4 text-green-600" />
               <AlertDescription>
-                Password updated successfully! Redirecting you to login...
+                Password updated successfully. Redirecting you to login...
               </AlertDescription>
             </Alert>
           ) : !sessionReady ? (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                This reset link is invalid or has expired.{" "}
+                {error || "This reset link is invalid or has expired."}{" "}
                 <a href="/forgot-password" className="underline font-medium">
                   Request a new one
                 </a>
@@ -134,10 +184,10 @@ function ResetPasswordContent() {
             </Alert>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
-              {sessionError && (
+              {error && (
                 <Alert variant="destructive">
                   <AlertCircle className="h-4 w-4" />
-                  <AlertDescription>{sessionError}</AlertDescription>
+                  <AlertDescription>{error}</AlertDescription>
                 </Alert>
               )}
               <div className="space-y-2">
@@ -190,14 +240,16 @@ function ResetPasswordContent() {
 
 export default function ResetPasswordPage() {
   return (
-    <Suspense fallback={
-      <div className="container max-w-md mx-auto px-4 py-16">
-        <div className="flex flex-col items-center gap-3 py-8 text-muted-foreground">
-          <Loader2 className="h-6 w-6 animate-spin" />
-          <p className="text-sm">Loading...</p>
+    <Suspense
+      fallback={
+        <div className="container max-w-md mx-auto px-4 py-16">
+          <div className="flex flex-col items-center gap-3 py-8 text-muted-foreground">
+            <Loader2 className="h-6 w-6 animate-spin" />
+            <p className="text-sm">Loading...</p>
+          </div>
         </div>
-      </div>
-    }>
+      }
+    >
       <ResetPasswordContent />
     </Suspense>
   );

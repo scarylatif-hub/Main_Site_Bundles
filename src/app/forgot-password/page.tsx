@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { createBrowserClient } from "@supabase/ssr";
+import { supabase } from "@/lib/supabase/client";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,24 +23,41 @@ export default function ForgotPasswordPage() {
     e.preventDefault();
     setLoading(true);
     setError("");
+    setSuccess(false);
 
-    const supabase = createBrowserClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
+    const normalizedEmail = email.trim().toLowerCase();
+    const configuredAppUrl = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, "");
+    const currentOrigin =
+      typeof window !== "undefined" ? window.location.origin : "";
+    const redirectBaseUrl = configuredAppUrl || currentOrigin;
+    const redirectTo = redirectBaseUrl
+      ? `${redirectBaseUrl}/reset-password`
+      : undefined;
 
-    // redirectTo must match exactly what's in Supabase → Auth → Redirect URLs
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: "http://localhost:9002/reset-password",
+    const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
+      redirectTo,
     });
 
     setLoading(false);
 
     if (error) {
-      setError(error.message);
-    } else {
-      setSuccess(true);
+      console.error("Password reset email error:", {
+        message: error.message,
+        name: error.name,
+        status: error.status,
+        redirectTo,
+      });
+      setError(
+        error.status && error.status >= 500
+          ? "Supabase could not send the reset email. Please check your Supabase Auth email/SMTP settings and allowed redirect URLs."
+          : error.message ||
+              "Could not send the reset email. Please check the email address and try again."
+      );
+      return;
     }
+
+    setEmail(normalizedEmail);
+    setSuccess(true);
   };
 
   return (
@@ -56,7 +73,7 @@ export default function ForgotPasswordPage() {
             <Alert className="bg-success/10 border-success/30">
               <CheckCircle className="h-4 w-4 text-green-600" />
               <AlertDescription>
-                Password reset email sent! Check your inbox and follow the link
+                Password reset email sent. Check your inbox and follow the link
                 to reset your password.
               </AlertDescription>
             </Alert>
