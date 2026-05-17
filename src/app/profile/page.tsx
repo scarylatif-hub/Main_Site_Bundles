@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/context/auth-context";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { AVATAR_OPTIONS, buildAvatarUrl } from "@/lib/avatars";
 import type { Profile } from "@/lib/definitions";
 import {
@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 
-export default function ProfilePage() {
+function ProfilePageContent() {
   const { user, userProfile, loading, logout, refreshUser } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -497,5 +497,19 @@ export default function ProfilePage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+export default function ProfilePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex justify-center items-center h-screen">
+          <div>Loading...</div>
+        </div>
+      }
+    >
+      <ProfilePageContent />
+    </Suspense>
   );
 }
