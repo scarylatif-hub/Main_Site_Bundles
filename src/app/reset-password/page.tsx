@@ -50,41 +50,20 @@ export default function ResetPasswordPage() {
           return;
         }
 
-        setSessionReady(true);
-        setVerifying(false);
-        return;
-      }
+        const { error } = await supabase.auth.setSession({
+          access_token: tokenHash,
+          refresh_token: tokenHash,
+        });
 
-      // Implicit flow — token is in the URL hash (#access_token=...&type=recovery)
-      // onAuthStateChange handles this automatically
-      const { data: { subscription } } = supabase.auth.onAuthStateChange(
-        (event, session) => {
-          if (event === "PASSWORD_RECOVERY" || (event === "SIGNED_IN" && session)) {
-            setSessionReady(true);
-            setVerifying(false);
-          }
+        if (error) {
+          setError("Invalid or expired token. Please request a new password reset.");
+        } else {
+          setSessionReady(true);
         }
-      );
-
-      // Fallback: check existing session
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        setSessionReady(true);
-        setVerifying(false);
-        subscription.unsubscribe();
-        return;
+      } else {
+        setError("Invalid reset link. Please check your email or request a new one.");
       }
-
-      // If nothing fires within 4 seconds, show expired message
-      const timeout = setTimeout(() => {
-        setVerifying(false);
-        subscription.unsubscribe();
-      }, 4000);
-
-      return () => {
-        clearTimeout(timeout);
-        subscription.unsubscribe();
-      };
+      setVerifying(false);
     };
 
     verifyToken();
