@@ -4,9 +4,6 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   swcMinify: false,
-  experimental: {
-    forceSwcTransforms: false,
-  },
 
   async redirects() {
     return [
@@ -59,19 +56,6 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-
-  experimental: {
-    serverMinification: false,
-  },
-
-  // Required for Firebase Studio / Cloudworkstations dev preview.
-  // Allows Next.js dev server to serve /_next/* assets to the studio proxy
-  // which accesses the app from a different origin than the app port.
-  allowedDevOrigins: [
-    "*.cloudworkstations.dev",
-    "*.firebase-studio-*.cloudworkstations.dev",
-    "*.cluster-*.cloudworkstations.dev",
-  ],
 };
 
 export default nextConfig;
