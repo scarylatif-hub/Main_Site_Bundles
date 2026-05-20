@@ -44,6 +44,7 @@ export default function FloatingWhatsApp() {
       border-radius: 50%;
       background: rgba(37,211,102,0.3);
       animation: waPulse 2s ease-out infinite;
+      pointer-events: none;
     }
     #wa-float-btn .wa-link {
       display: flex;
@@ -55,6 +56,8 @@ export default function FloatingWhatsApp() {
       background: #25D366;
       text-decoration: none;
       box-shadow: 0 4px 16px rgba(37,211,102,0.5);
+      position: relative;
+      z-index: 1;
     }
     #wa-float-btn .wa-badge {
       position: absolute;
