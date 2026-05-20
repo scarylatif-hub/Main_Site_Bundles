@@ -18,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from '@/hooks/use-toast';
 import { validatePhoneNumber } from '@/lib/networks';
 import { WalletDepositCard } from '@/components/wallet-deposit-card';
+import FloatingWhatsApp from '@/components/floating-whatsapp';
 
 export default function Home() {
   if (isStoreApp) {
@@ -177,6 +178,8 @@ export default function Home() {
           </div>
         ))}
       </div>
+
+      <FloatingWhatsApp />
     </div>
   );
 }
