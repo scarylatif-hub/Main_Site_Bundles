@@ -263,6 +263,11 @@ export default async function MyAdminDashboardPage() {
     return sum + retail * (1 - 1 / m);
   }, 0);
 
+  const webhookUrl = process.env.NEXT_PUBLIC_APP_URL?.trim()
+    ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "")}/api/webhooks/dakazina`
+    : null;
+  const datakazinaApiKeyStatus = process.env.DATAKAZINA_API_KEY ? "Configured" : "Missing";
+
   const now = new Date();
 
   const dailyMap = new Map<string, SeriesPoint>();
@@ -413,6 +418,33 @@ export default async function MyAdminDashboardPage() {
           </CardHeader>
           <CardContent className="text-xs text-muted-foreground">
             Estimated from all orders using retail multiplier ({m.toFixed(4)}x)
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>DataKazina webhook</CardDescription>
+            <CardTitle className="text-base break-words">
+              {webhookUrl ?? "NEXT_PUBLIC_APP_URL is not set"}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">
+            Use this endpoint in Dakazina dashboard: <br />
+            <span className="font-mono break-words">/api/webhooks/dakazina</span>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>DataKazina API Key</CardDescription>
+            <CardTitle className="text-base">
+              {datakazinaApiKeyStatus}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-xs text-muted-foreground">
+            Do not display the raw secret in the browser. If this says "Missing", set DATAKAZINA_API_KEY in your environment.
           </CardContent>
         </Card>
       </div>

@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import type { AdminOrderRow } from "@/lib/external-all-orders";
+import { supabase } from "@/lib/supabase/client";
 import { NETWORKS } from "@/lib/networks";
 import { ORDER_STATUSES } from "@/lib/order-status";
 import {
@@ -94,28 +95,33 @@ function StatusBadge({ status }: { status: string }) {
   if (s === "success" || s === "placed" || s === "completed")
     return (
       <Badge className="gap-1 bg-orange-500 hover:bg-orange-500/90 text-white border-0 whitespace-nowrap">
-        <ShoppingCart className="h-3 w-3" /> PLACED
+        <ShoppingCart className="h-3 w-3" /> Placed
       </Badge>
     );
   if (s === "pending" || s === "processing")
     return (
       <Badge className="gap-1 bg-sky-100 text-sky-900 hover:bg-sky-100/90 whitespace-nowrap">
-        <RefreshCw className="h-3 w-3" /> PROCESSING
+        <RefreshCw className="h-3 w-3" /> Processing
       </Badge>
     );
   if (s === "delivered")
     return (
       <Badge className="gap-1 bg-emerald-600 hover:bg-emerald-600/90 text-white border-0 whitespace-nowrap">
-        <CheckCircle2 className="h-3 w-3" /> DELIVERED
+        <CheckCircle2 className="h-3 w-3" /> Delivered
       </Badge>
     );
   if (s === "canceled" || s === "cancelled")
     return (
       <Badge className="gap-1 bg-zinc-200 text-zinc-900 whitespace-nowrap">
-        <XCircle className="h-3 w-3" /> CANCELED
+        <XCircle className="h-3 w-3" /> Canceled
       </Badge>
     );
-  return <Badge className="whitespace-nowrap bg-red-600 text-white">{status.toUpperCase()}</Badge>;
+  const displayLabel = String(status)
+    .toLowerCase()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+  return <Badge className="whitespace-nowrap bg-red-600 text-white">{displayLabel}</Badge>;
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -133,6 +139,79 @@ export function AdminOrdersTable({
   );
   const [saving, setSaving] = useState<string | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
+  const [liveRows, setLiveRows] = useState(rows);
+
+  useEffect(() => {
+    setLiveRows(rows);
+  }, [rows]);
+
+  useEffect(() => {
+    const updateRowFromRecord = (record: Record<string, unknown>, table: "orders" | "transactions") => {
+      setLiveRows((current) =>
+        current.map((row) => {
+          const matchesOrder =
+            table === "orders" &&
+            (
+              row.id === record.id ||
+              row.paystack_transaction_id === record.paystack_transaction_id ||
+              row.payment_reference === record.payment_reference ||
+              row.provider_order_id === record.dakazina_order_id ||
+              row.dakazina_order_id === record.dakazina_order_id
+            );
+
+          const matchesTransaction =
+            table === "transactions" &&
+            (
+              row.id === record.id ||
+              row.reference === record.reference ||
+              row.transaction_code === record.transaction_code ||
+              row.provider_order_id === record.dakazina_order_id ||
+              row.dakazina_order_id === record.dakazina_order_id
+            );
+
+          if (!matchesOrder && !matchesTransaction) {
+            return row;
+          }
+
+          return {
+            ...row,
+            status: (record.status as string) ?? row.status,
+            provider_order_id: (record.dakazina_order_id as string) ?? row.provider_order_id,
+            dakazina_order_id: (record.dakazina_order_id as string) ?? row.dakazina_order_id,
+            paystack_transaction_id:
+              (record.paystack_transaction_id as string) ?? row.paystack_transaction_id,
+            payment_reference:
+              (record.payment_reference as string) ?? row.payment_reference,
+            transaction_code:
+              (record.transaction_code as string) ?? row.transaction_code,
+            reference: (record.reference as string) ?? row.reference,
+          };
+        })
+      );
+    };
+
+    const channel = supabase
+      .channel("admin-orders-realtime")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "orders" },
+        (payload) => {
+          if (payload.new) updateRowFromRecord(payload.new as Record<string, unknown>, "orders");
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "transactions" },
+        (payload) => {
+          if (payload.new) updateRowFromRecord(payload.new as Record<string, unknown>, "transactions");
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, []);
 
   // ── Filter state ──────────────────────────────────────────────────────────
   const [search, setSearch] = useState("");
@@ -211,29 +290,31 @@ export function AdminOrdersTable({
   };
 
   // Unique networks from current data for filter dropdown
+  const rowsToRender = liveRows;
+
   const availableNetworks = useMemo(() => {
     const nets = new Set<string>();
-    rows.forEach((r) => {
+    rowsToRender.forEach((r) => {
       const n = getNetworkLabel(r);
       if (n && n !== "—") nets.add(n);
     });
     return Array.from(nets).sort();
-  }, [rows]);
+  }, [rowsToRender]);
 
   // Unique statuses (resolved with overrides) for the filter dropdown
   const availableStatuses = useMemo(() => {
     const statuses = new Set<string>();
-    rows.forEach((r) => {
+    rowsToRender.forEach((r) => {
       const k = overrideKey(r);
       const current = overrides[k] ?? r.status;
       if (current) statuses.add(current);
     });
     return Array.from(statuses).sort();
-  }, [rows, overrides]);
+  }, [rowsToRender, overrides]);
 
   // ── Filtered rows ─────────────────────────────────────────────────────────
   const filteredRows = useMemo(() => {
-    return rows.filter((row) => {
+    return rowsToRender.filter((row) => {
       const k = overrideKey(row);
       const current = (overrides[k] ?? row.status ?? "").toLowerCase();
       const net = getNetworkLabel(row);
@@ -255,7 +336,7 @@ export function AdminOrdersTable({
 
       return passesStatus && passesNetwork && passesSource && passesSearch;
     });
-  }, [rows, overrides, search, statusFilter, networkFilter, sourceFilter]);
+  }, [rowsToRender, overrides, search, statusFilter, networkFilter, sourceFilter]);
 
   const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const pagedRows = useMemo(() => {
@@ -407,7 +488,7 @@ export function AdminOrdersTable({
     }
   }
 
-  if (rows.length === 0) {
+  if (rowsToRender.length === 0) {
     return <p className="text-muted-foreground text-center py-12">No orders yet.</p>;
   }
 
@@ -503,7 +584,7 @@ export function AdminOrdersTable({
         {/* Active filter summary */}
         {(activeFilterCount > 0 || search) && (
           <span className="text-xs text-muted-foreground shrink-0">
-            {filteredRows.length} of {rows.length} orders
+            {filteredRows.length} of {rowsToRender.length} orders
           </span>
         )}
       </div>

@@ -23,6 +23,7 @@ import { normalizePhoneNumber }       from "@/lib/networks";
 import { displayNetworkIdToDatakazina } from "@/lib/network-id-map";
 import { computeResellerProfitGhs } from "@/lib/reseller-earnings";
 import { sendNtfyNotification } from "@/lib/server/notifications";
+import { extractDakazinaOrderCode } from "@/lib/dakazina-order-code";
 
 // ── Paystack verification ─────────────────────────────────────────────────────
 
@@ -231,6 +232,12 @@ export async function POST(req: NextRequest) {
     deliveryResult.data.reference ??
     dakazinaRef;
 
+  // Extract Dakazina's order code (e.g., ORDER-703436) from the response
+  const dakazinaOrderCode = extractDakazinaOrderCode(
+    (deliveryResult.data ?? {}) as Record<string, unknown>,
+    providerCode
+  );
+
   // Removed success logging to prevent exposing transaction codes
 
   // Calculate reseller profit before updating order
@@ -245,6 +252,7 @@ export async function POST(req: NextRequest) {
     .update({
       status:                   "delivered",
       paystack_transaction_id:  providerCode,
+      dakazina_order_id:        dakazinaOrderCode,
       error_message:            null,
       reseller_profit:          resellerProfit > 0 ? resellerProfit : 0,
     })

@@ -53,12 +53,17 @@ function getNetworkName(networkId: number): string {
 
 function orderStatusBadge(status: string) {
   const normalized = status?.toLowerCase() || 'unknown';
+  const displayLabel = String(status)
+    .toLowerCase()
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
   
   if (['completed', 'delivered', 'success'].includes(normalized)) {
     return (
       <Badge className="gap-1 bg-emerald-600 hover:bg-emerald-600/90 text-white border-0">
         <CheckCircle2 className="h-3 w-3" />
-        {status.toUpperCase()}
+        {displayLabel}
       </Badge>
     );
   }
@@ -66,7 +71,7 @@ function orderStatusBadge(status: string) {
     return (
       <Badge variant="secondary" className="gap-1 bg-sky-100 text-sky-900 hover:bg-sky-100/90">
         <Processing className="h-3 w-3" />
-        {status.toUpperCase()}
+        {displayLabel}
       </Badge>
     );
   }
@@ -74,7 +79,7 @@ function orderStatusBadge(status: string) {
     return (
       <Badge variant="secondary" className="gap-1 bg-zinc-200 text-zinc-900">
         <XCircle className="h-3 w-3" />
-        {status.toUpperCase()}
+        {displayLabel}
       </Badge>
     );
   }

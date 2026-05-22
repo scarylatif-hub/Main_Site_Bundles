@@ -27,10 +27,12 @@ const NTFY_URL = `https://ntfy.sh/${NTFY_TOPIC}`;
 
 async function sendNtfyNotification(title: string, message: string) {
   try {
+    // HTTP headers must be ASCII-safe; strip non-ASCII (emoji) to avoid ByteString errors
+    const asciiTitle = String(title).replace(/[^\x20-\x7E]/g, "").trim() || "Notification";
     await fetch(NTFY_URL, {
       method: "POST",
       headers: {
-        "Title": title,
+        "Title": asciiTitle,
         "Priority": "high",
       },
       body: message,
@@ -221,7 +223,8 @@ export async function POST(req: NextRequest) {
         await admin
           .from("transactions")
           .update({
-            status: "processing",
+            // Use DB-safe status value; some DB schemas enforce 'pending'|'completed'|'failed'
+            status: "pending",
             description: `${description} (duplicate acknowledged)`,
           })
           .eq("id", transactionId);
@@ -246,10 +249,12 @@ export async function POST(req: NextRequest) {
     );
 
     const patch = {
-      reference:        providerCode,
-      transaction_code: providerCode,
-      status:           "processing",
-      description:      `${description} | api_ref:${reference}`,
+      reference:           providerCode,
+      transaction_code:    providerCode,
+      dakazina_order_id:   providerCode,
+      // Provider accepted the order; mark as pending in DB (schema may not allow 'processing')
+      status:              "pending",
+      description:         `${description} | api_ref:${reference}`,
     };
 
     const { error: updateErr } = await admin

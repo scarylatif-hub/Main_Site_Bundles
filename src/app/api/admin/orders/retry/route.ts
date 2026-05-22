@@ -87,9 +87,10 @@ export async function POST(req: NextRequest) {
   }
 
   // 4. Set order to "processing" before attempting delivery
+  // Some DB schemas enforce a narrower set of status values; use 'pending' which is DB-safe
   await admin
     .from("orders")
-    .update({ status: "processing", error_message: null })
+    .update({ status: "pending", error_message: null })
     .eq("id", order_id);
 
   const retryRef = `retry-${order_id}-${Date.now()}`;

@@ -38,7 +38,11 @@ const networkMap = new Map(NETWORKS.map((n) => [n.id, n.name]));
 
 export function orderStatusBadge(rawStatus: string) {
   const bucket = classifyOrderStatusForDisplay(rawStatus);
-  const displayLabel = normalizeOrderStatus(rawStatus).toUpperCase() || 'UNKNOWN';
+  const normalized = normalizeOrderStatus(rawStatus);
+  const displayLabel = normalized
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ') || 'UNKNOWN';
 
   if (bucket === 'placed')
     return (
