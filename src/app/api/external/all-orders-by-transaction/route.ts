@@ -47,16 +47,24 @@ export async function GET(request: NextRequest) {
     // Fetch all transactions from DataKazina and filter by reference
     const result = await datakazinaAPI.fetchTransactions();
     
-    if (!result.ok || !result.data) {
-      return NextResponse.json(null, { status: 200 });
+    if (result.ok && result.data) {
+      const transactions = Array.isArray(result.data) ? result.data : [result.data];
+      const matchingTransaction = transactions.find(
+        (t: any) => t.incoming_api_ref === transactionId || t.id === transactionId
+      );
+
+      if (matchingTransaction) {
+        return NextResponse.json(matchingTransaction);
+      }
     }
 
-    // Find transaction matching the transactionId (incoming_api_ref)
-    const matchingTransaction = result.data.find(
-      (t: any) => t.incoming_api_ref === transactionId || t.id === transactionId
-    );
+    // Provider may support single-transaction lookup when the bulk history endpoint is empty.
+    const singleResult = await datakazinaAPI.fetchSingleTransaction(transactionId);
+    if (singleResult.ok && singleResult.data) {
+      return NextResponse.json(singleResult.data);
+    }
 
-    return NextResponse.json(matchingTransaction || null);
+    return NextResponse.json(null, { status: 200 });
   } catch (error) {
     console.error('Error in GET /api/external/all-orders-by-transaction:', error);
     return NextResponse.json(null, { status: 200 });

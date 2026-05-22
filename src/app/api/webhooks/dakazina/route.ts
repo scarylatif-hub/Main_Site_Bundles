@@ -43,7 +43,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, skipped: "test_event" }, { status: 200 });
   }
 
-  const dakazinaOrderCode = String(body.order_code ?? "").trim();
+  const dakazinaOrderCode = String(
+    body.order_code ?? body.transaction_id ?? body.transaction_code ?? ""
+  ).trim();
   const referenceCandidates = collectWebhookReferences(body).filter(
     (value) => value !== dakazinaOrderCode
   );

@@ -130,8 +130,35 @@ class DataKazinaAPI {
   }
 
   /** GET /fetch-transactions */
-  fetchTransactions(): Promise<DKResult<unknown[]>> {
-    return this.request<unknown[]>("/fetch-transactions", {}, true); // Use main endpoint for main site orders
+  async fetchTransactions(): Promise<DKResult<unknown[]>> {
+    const primary = await this.request<unknown[]>("/fetch-transactions", {}, true);
+    if (primary.ok) {
+      return primary;
+    }
+
+    if (MAIN_BASE_URL && BASE_URL && MAIN_BASE_URL !== BASE_URL) {
+      console.warn(
+        "[provider-api] fetchTransactions primary endpoint failed, retrying on BASE_URL",
+        { status: primary.status }
+      );
+      const fallback = await this.request<unknown[]>("/fetch-transactions", {}, false);
+      if (fallback.ok) {
+        return fallback;
+      }
+    }
+
+    return primary;
+  }
+
+  /** POST /fetch-single-transaction */
+  fetchSingleTransaction(
+    transactionId: string,
+    useMainEndpoint: boolean = false
+  ): Promise<DKResult<unknown>> {
+    return this.request<unknown>("/fetch-single-transaction", {
+      method: "POST",
+      body: JSON.stringify({ transaction_id: transactionId }),
+    }, useMainEndpoint);
   }
 
   /** GET /check-console-balance */
