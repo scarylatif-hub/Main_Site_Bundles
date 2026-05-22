@@ -15,6 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { AdjustStoreBalanceDialog } from "@/components/admin/adjust-store-balance-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -87,6 +88,7 @@ export default async function AdminStoresBalancesPage() {
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Store Balance</TableHead>
                     <TableHead className="text-right">Wallet Balance</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -116,6 +118,13 @@ export default async function AdminStoresBalancesPage() {
                         </TableCell>
                         <TableCell className="text-right font-semibold">
                           GHS {Number(store.wallet_balance || 0).toFixed(2)}
+                        </TableCell>
+                        <TableCell>
+                          <AdjustStoreBalanceDialog
+                            storeId={store.id}
+                            storeName={store.store_name || "Unnamed Store"}
+                            availableBalance={Number(store.store_balance || 0)}
+                          />
                         </TableCell>
                       </TableRow>
                     );

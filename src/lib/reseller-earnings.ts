@@ -99,13 +99,12 @@ export async function computeResellerEarningsSummary(
     const method = String(row.method || "").toLowerCase();
     const status = String(row.status || "").toLowerCase();
 
-    const isWithdrawal = method === "momo";
-    if (!isWithdrawal && status === "completed") {
+    if (status === "completed") {
       transferredAmount += amount;
     }
 
     if (
-      isWithdrawal &&
+      method === "momo" &&
       (status === "pending" || status === "processing" || status === "approved")
     ) {
       pendingWithdrawalAmount += amount;
