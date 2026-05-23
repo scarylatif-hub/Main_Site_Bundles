@@ -1,15 +1,26 @@
 /**
- * Extract Dakazina's canonical order identifier (e.g. ORDER-658581).
+ * Extract Dakazina's canonical order identifier.
+ * Dakazina returns transaction_code like "926TEST-0020595919802"
+ * NOT "ORDER-XXXXXX" format in their API response.
  */
 
-const ORDER_CODE_KEYS = ["order_code", "orderCode"] as const;
+const ORDER_CODE_KEYS = [
+  "order_code",
+  "orderCode",
+  "transaction_code",   // ← ADD THIS — this is what Dakazina actually returns
+  "transactionCode",    // ← ADD THIS — camelCase variant
+] as const;
 
 const ORDER_CODE_IN_TEXT_RE = /\b(ORDER-\d+|DKZ-[A-Z0-9-]+)\b/i;
 
 export function looksLikeDakazinaOrderCode(value: string): boolean {
   const trimmed = String(value ?? "").trim();
   if (trimmed === "") return false;
-  return /^ORDER-\d+$/i.test(trimmed) || /^DKZ-[A-Z0-9-]+$/i.test(trimmed);
+  return (
+    /^ORDER-\d+$/i.test(trimmed) ||
+    /^DKZ-[A-Z0-9-]+$/i.test(trimmed) ||
+    /^926[A-Z0-9-]+$/i.test(trimmed)   // ← ADD THIS — matches "926TEST-002..." format
+  );
 }
 
 function pickString(
@@ -87,11 +98,7 @@ export function extractDakazinaOrderCode(
 
   const orderCode = pickString(unwrapped, ORDER_CODE_KEYS);
   if (orderCode) {
-    const trimmed = String(orderCode).trim();
-    if (looksLikeDakazinaOrderCode(trimmed)) {
-      return trimmed.toUpperCase();
-    }
-    return trimmed;
+    return orderCode.trim();
   }
 
   return fallback.trim() || fallback;

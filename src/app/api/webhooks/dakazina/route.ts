@@ -10,11 +10,6 @@ function normalizeWebhookStatus(raw: unknown): string {
   return normalizeStatusForEarnings(raw);
 }
 
-/**
- * Verify Dakazina HMAC-SHA256 signature.
- * Header format: "sha256=<hex_digest>"
- * Signed payload: "<timestamp>.<raw_body>"
- */
 function verifyDakazinaSignature(
   rawBody: string,
   signature: string | null,
@@ -23,7 +18,6 @@ function verifyDakazinaSignature(
 ): boolean {
   if (!signature || !timestamp) return false;
 
-  // Reject stale webhooks (> 5 minutes)
   const ts = parseInt(timestamp, 10);
   if (Number.isNaN(ts)) return false;
   const ageSeconds = Math.abs(Date.now() / 1000 - ts);
@@ -47,7 +41,6 @@ function verifyDakazinaSignature(
       Buffer.from(expectedHex, "hex")
     );
   } catch {
-    // Buffer lengths differ → invalid
     return false;
   }
 }
@@ -73,7 +66,6 @@ function collectWebhookReferences(body: Record<string, unknown>): string[] {
 export async function POST(req: NextRequest) {
   console.log("📦 Dakazina webhook: Received request");
 
-  // Read raw body first (needed for signature verification)
   const rawBody = await req.text();
   let body: Record<string, unknown>;
   try {
@@ -85,7 +77,8 @@ export async function POST(req: NextRequest) {
 
   console.log("📋 Dakazina webhook: Full payload:", JSON.stringify(body, null, 2));
 
-  const secret = process.env.DAKAZINA_WEBHOOK_SECRET_DISABLED?.trim();
+  // Only check signature if DAKAZINA_WEBHOOK_SECRET is set in Vercel env vars
+  const secret = process.env.DAKAZINA_WEBHOOK_SECRET?.trim();
 
   if (secret) {
     const signature = req.headers.get("dakazina-signature");
@@ -93,15 +86,12 @@ export async function POST(req: NextRequest) {
     const valid = verifyDakazinaSignature(rawBody, signature, timestamp, secret);
 
     if (!valid) {
-      console.error("❌ Dakazina webhook: Invalid signature", {
-        signature,
-        timestamp,
-      });
+      console.error("❌ Dakazina webhook: Invalid signature", { signature, timestamp });
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
   }
 
-  // Skip test events (both signals)
+  // Skip test events
   if (body.test === true || body.type === "test_event") {
     console.log("⚠️  Dakazina webhook: Test event received, skipping");
     return NextResponse.json({ ok: true, skipped: "test_event" }, { status: 200 });
@@ -185,8 +175,10 @@ export async function POST(req: NextRequest) {
   }
 
   console.log(`✅ Dakazina webhook: Found ${transactionMatches?.length ?? 0} transactions`);
+  console.log("📝 Dakazina webhook: Transaction patch being applied:", transactionPatch);
 
   const transactionIds = [...new Set((transactionMatches ?? []).map((r) => r.id))];
+  console.log("🆔 Dakazina webhook: Transaction IDs to update:", transactionIds);
   let transactionsUpdated = 0;
 
   if (transactionIds.length > 0) {
@@ -201,6 +193,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: transactionUpdateError.message }, { status: 200 });
     }
     transactionsUpdated = updatedTransactions?.length ?? 0;
+    console.log(`✅ Dakazina webhook: Updated ${transactionsUpdated} transactions`);
   }
 
   // ── Orders lookup ────────────────────────────────────────────────────────
@@ -239,8 +232,10 @@ export async function POST(req: NextRequest) {
   }
 
   console.log(`✅ Dakazina webhook: Found ${orderMatches?.length ?? 0} orders`);
+  console.log("📝 Dakazina webhook: Order patch being applied:", orderPatch);
 
   const orderIds = [...new Set((orderMatches ?? []).map((r) => r.id))];
+  console.log("🆔 Dakazina webhook: Order IDs to update:", orderIds);
   let ordersUpdated = 0;
 
   if (orderIds.length > 0) {
@@ -255,6 +250,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: orderUpdateError.message }, { status: 200 });
     }
     ordersUpdated = updatedOrders?.length ?? 0;
+    console.log(`✅ Dakazina webhook: Updated ${ordersUpdated} orders`);
   }
 
   const response = {
@@ -269,7 +265,8 @@ export async function POST(req: NextRequest) {
     test: body.test ?? false,
   };
 
-  console.log("✅ Dakazina webhook processed successfully:", response);
+  console.log("✅ SUCCESS - Dakazina webhook processed successfully:", response);
+  console.log(`📊 FINAL STATUS: ${transactionsUpdated} transactions updated, ${ordersUpdated} orders updated`);
   return NextResponse.json(response);
 }
 
