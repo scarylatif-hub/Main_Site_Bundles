@@ -80,7 +80,7 @@ export async function GET(req: NextRequest) {
     const rawExternal = await fetchExternalAllOrdersRaw();
     const statusLookup = buildApiOrderStatusLookup(rawExternal);
 
-    for (const k of keys) {
+    for (const k of keys.filter((key): key is string => typeof key === "string" && key.trim() !== "")) {
       if (statusLookup.has(k)) {
         (result.resolution["tier_2_provider_api"] as Record<string, unknown>).found = {
           key: k,

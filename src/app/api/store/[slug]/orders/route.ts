@@ -44,6 +44,7 @@ export async function GET(
 
     const orderReferences = (orders || [])
       .flatMap((order: any) => [
+        order.dakazina_order_id,
         order.paystack_transaction_id,
         order.payment_reference,
         order.id,
@@ -86,6 +87,7 @@ export async function GET(
       orders?.map((order: any) => {
         const resolved = resolveOrderStatusFromSources({
           candidateKeys: [
+            order.dakazina_order_id,
             order.paystack_transaction_id,
             order.payment_reference,
             order.id,

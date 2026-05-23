@@ -19,6 +19,7 @@ import { createAdminClient }          from "@/lib/supabase/admin";
 import { datakazinaAPI }              from "@/lib/datakazina";
 import { retryWithBackoff }           from "@/lib/server/retry";
 import { mapToDataKazinaNetworkId }   from "@/lib/networks";
+import { extractDakazinaOrderCode }   from "@/lib/dakazina-order-code";
 
 const RETRYABLE_STATUSES = new Set(["failed", "retry_pending"]);
 
@@ -141,17 +142,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const providerCode =
+  const providerCode = String(
     deliveryResult.data.order_code ??
-    deliveryResult.data.transaction_code ??
-    deliveryResult.data.reference ??
-    retryRef;
+      deliveryResult.data.transaction_code ??
+      deliveryResult.data.reference ??
+      retryRef ?? ""
+  );
+
+  const dakazinaOrderCode = extractDakazinaOrderCode(
+    (deliveryResult.data ?? {}) as Record<string, unknown>,
+    providerCode
+  );
 
   await admin
     .from("orders")
     .update({
       status:                  "completed",
       paystack_transaction_id: providerCode,
+      dakazina_order_id:       dakazinaOrderCode,
       error_message:           null,
     })
     .eq("id", order_id);

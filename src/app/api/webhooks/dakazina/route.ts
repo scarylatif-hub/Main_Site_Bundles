@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { normalizeStatusForEarnings } from "@/lib/reseller-earnings";
+import { extractDakazinaOrderCode } from "@/lib/dakazina-order-code";
+import { createHmac, timingSafeEqual } from "crypto";
 
 export const dynamic = "force-dynamic";
 
@@ -8,14 +10,60 @@ function normalizeWebhookStatus(raw: unknown): string {
   return normalizeStatusForEarnings(raw);
 }
 
+/**
+ * Verify Dakazina HMAC-SHA256 signature.
+ * Header format: "sha256=<hex_digest>"
+ * Signed payload: "<timestamp>.<raw_body>"
+ */
+function verifyDakazinaSignature(
+  rawBody: string,
+  signature: string | null,
+  timestamp: string | null,
+  secret: string
+): boolean {
+  if (!signature || !timestamp) return false;
+
+  // Reject stale webhooks (> 5 minutes)
+  const ts = parseInt(timestamp, 10);
+  if (Number.isNaN(ts)) return false;
+  const ageSeconds = Math.abs(Date.now() / 1000 - ts);
+  if (ageSeconds > 300) {
+    console.warn("⚠️  Dakazina webhook: Timestamp too old", { ageSeconds });
+    return false;
+  }
+
+  const expectedPrefix = "sha256=";
+  if (!signature.startsWith(expectedPrefix)) return false;
+
+  const receivedHex = signature.slice(expectedPrefix.length);
+  const payload = `${timestamp}.${rawBody}`;
+  const expectedHex = createHmac("sha256", secret)
+    .update(payload)
+    .digest("hex");
+
+  try {
+    return timingSafeEqual(
+      Buffer.from(receivedHex, "hex"),
+      Buffer.from(expectedHex, "hex")
+    );
+  } catch {
+    // Buffer lengths differ → invalid
+    return false;
+  }
+}
+
 function collectWebhookReferences(body: Record<string, unknown>): string[] {
   return [
     body.order_code,
     body.reference,
     body.transaction_id,
+    body.transactionId,
     body.transaction_code,
+    body.transactionCode,
     body.payment_reference,
+    body.paymentReference,
     body.paystack_transaction_id,
+    body.paystackTransactionId,
     body.id,
   ]
     .map((value) => String(value ?? "").trim())
@@ -24,28 +72,42 @@ function collectWebhookReferences(body: Record<string, unknown>): string[] {
 
 export async function POST(req: NextRequest) {
   console.log("📦 Dakazina webhook: Received request");
-  console.log("Headers:", Object.fromEntries(req.headers.entries()));
 
+  // Read raw body first (needed for signature verification)
+  const rawBody = await req.text();
   let body: Record<string, unknown>;
   try {
-    body = await req.json();
+    body = JSON.parse(rawBody);
   } catch (error) {
     console.error("❌ Dakazina webhook: Invalid JSON", error);
     return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 200 });
   }
 
-  // Log the FULL incoming payload for debugging
   console.log("📋 Dakazina webhook: Full payload:", JSON.stringify(body, null, 2));
 
-  // Dakazina sends test events from dashboard; acknowledge but do not mutate data.
-  if (body.test === true) {
+  const secret = process.env.DAKAZINA_WEBHOOK_SECRET?.trim();
+
+  if (secret) {
+    const signature = req.headers.get("dakazina-signature");
+    const timestamp = req.headers.get("dakazina-timestamp");
+    const valid = verifyDakazinaSignature(rawBody, signature, timestamp, secret);
+
+    if (!valid) {
+      console.error("❌ Dakazina webhook: Invalid signature", {
+        signature,
+        timestamp,
+      });
+      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    }
+  }
+
+  // Skip test events (both signals)
+  if (body.test === true || body.type === "test_event") {
     console.log("⚠️  Dakazina webhook: Test event received, skipping");
     return NextResponse.json({ ok: true, skipped: "test_event" }, { status: 200 });
   }
 
-  const dakazinaOrderCode = String(
-    body.order_code ?? body.transaction_id ?? body.transaction_code ?? ""
-  ).trim();
+  const dakazinaOrderCode = extractDakazinaOrderCode(body, "");
   const referenceCandidates = collectWebhookReferences(body).filter(
     (value) => value !== dakazinaOrderCode
   );
@@ -57,6 +119,7 @@ export async function POST(req: NextRequest) {
 
   const status = normalizeWebhookStatus(body.status);
   const previousStatus = normalizeWebhookStatus(body.previous_status);
+
   if (!status) {
     console.error("❌ Dakazina webhook: Missing status", body);
     return NextResponse.json({ ok: false, error: "Missing status" }, { status: 200 });
@@ -82,7 +145,6 @@ export async function POST(req: NextRequest) {
   if (dakazinaOrderCode) {
     transactionPatch.dakazina_order_id = dakazinaOrderCode;
   }
-
   if (body.recipient_msisdn) {
     transactionPatch.recipient_msisdn = String(body.recipient_msisdn);
   }
@@ -90,48 +152,41 @@ export async function POST(req: NextRequest) {
     transactionPatch.bundle_amount = String(body.bundle_amount);
   }
 
+  // ── Transactions lookup ──────────────────────────────────────────────────
   let transactionMatches: any[] | null = null;
   let transactionLookupError: any = null;
 
   if (dakazinaOrderCode) {
-    console.log(`🔍 Dakazina webhook: Looking up transactions by dakazina_order_id: ${dakazinaOrderCode}`);
     const result = await admin
       .from("transactions")
       .select("id, reference, transaction_code, status, dakazina_order_id")
       .eq("transaction_type", "purchase")
       .eq("dakazina_order_id", dakazinaOrderCode);
-
     transactionMatches = result.data;
     transactionLookupError = result.error;
   }
 
   if ((!transactionMatches || transactionMatches.length === 0) && referenceCandidates.length > 0) {
     const orClause = referenceCandidates
-      .map((reference) => `reference.eq.${reference},transaction_code.eq.${reference}`)
+      .map((r) => `reference.eq.${r},transaction_code.eq.${r}`)
       .join(",");
-
-    console.log(`🔍 Dakazina webhook: Fallback - Looking up transactions by other references: ${orClause}`);
     const result = await admin
       .from("transactions")
       .select("id, reference, transaction_code, status, dakazina_order_id")
       .eq("transaction_type", "purchase")
       .or(orClause);
-
     transactionMatches = result.data;
     transactionLookupError = result.error;
   }
 
   if (transactionLookupError) {
     console.error("❌ Dakazina webhook: Transaction lookup failed", transactionLookupError);
-    return NextResponse.json(
-      { ok: false, error: transactionLookupError.message },
-      { status: 200 }
-    );
+    return NextResponse.json({ ok: false, error: transactionLookupError.message }, { status: 200 });
   }
 
-  console.log(`✅ Dakazina webhook: Found ${transactionMatches?.length || 0} transactions`);
+  console.log(`✅ Dakazina webhook: Found ${transactionMatches?.length ?? 0} transactions`);
 
-  const transactionIds = [...new Set((transactionMatches || []).map((row) => row.id))];
+  const transactionIds = [...new Set((transactionMatches ?? []).map((r) => r.id))];
   let transactionsUpdated = 0;
 
   if (transactionIds.length > 0) {
@@ -143,19 +198,13 @@ export async function POST(req: NextRequest) {
 
     if (transactionUpdateError) {
       console.error("❌ Dakazina webhook: Transaction update failed", transactionUpdateError);
-      return NextResponse.json(
-        { ok: false, error: transactionUpdateError.message },
-        { status: 200 }
-      );
+      return NextResponse.json({ ok: false, error: transactionUpdateError.message }, { status: 200 });
     }
-
-    transactionsUpdated = updatedTransactions?.length || 0;
+    transactionsUpdated = updatedTransactions?.length ?? 0;
   }
 
-  const orderPatch: Record<string, unknown> = {
-    status,
-  };
-
+  // ── Orders lookup ────────────────────────────────────────────────────────
+  const orderPatch: Record<string, unknown> = { status };
   if (dakazinaOrderCode) {
     orderPatch.dakazina_order_id = dakazinaOrderCode;
   }
@@ -164,30 +213,22 @@ export async function POST(req: NextRequest) {
   let orderLookupError: any = null;
 
   if (dakazinaOrderCode) {
-    console.log(`🔍 Dakazina webhook: Looking up orders by dakazina_order_id: ${dakazinaOrderCode}`);
     const result = await admin
       .from("orders")
       .select("id, paystack_transaction_id, payment_reference, status, dakazina_order_id")
       .eq("dakazina_order_id", dakazinaOrderCode);
-
     orderMatches = result.data;
     orderLookupError = result.error;
   }
 
   if ((!orderMatches || orderMatches.length === 0) && referenceCandidates.length > 0) {
     const orderOrClause = referenceCandidates
-      .map(
-        (reference) =>
-          `paystack_transaction_id.eq.${reference},payment_reference.eq.${reference}`
-      )
+      .map((r) => `paystack_transaction_id.eq.${r},payment_reference.eq.${r}`)
       .join(",");
-
-    console.log(`🔍 Dakazina webhook: Fallback - Looking up orders by other references: ${orderOrClause}`);
     const result = await admin
       .from("orders")
       .select("id, paystack_transaction_id, payment_reference, status, dakazina_order_id")
       .or(orderOrClause);
-
     orderMatches = result.data;
     orderLookupError = result.error;
   }
@@ -197,9 +238,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: orderLookupError.message }, { status: 200 });
   }
 
-  console.log(`✅ Dakazina webhook: Found ${orderMatches?.length || 0} orders`);
+  console.log(`✅ Dakazina webhook: Found ${orderMatches?.length ?? 0} orders`);
 
-  const orderIds = [...new Set((orderMatches || []).map((row) => row.id))];
+  const orderIds = [...new Set((orderMatches ?? []).map((r) => r.id))];
   let ordersUpdated = 0;
 
   if (orderIds.length > 0) {
@@ -211,13 +252,9 @@ export async function POST(req: NextRequest) {
 
     if (orderUpdateError) {
       console.error("❌ Dakazina webhook: Order update failed", orderUpdateError);
-      return NextResponse.json(
-        { ok: false, error: orderUpdateError.message },
-        { status: 200 }
-      );
+      return NextResponse.json({ ok: false, error: orderUpdateError.message }, { status: 200 });
     }
-
-    ordersUpdated = updatedOrders?.length || 0;
+    ordersUpdated = updatedOrders?.length ?? 0;
   }
 
   const response = {

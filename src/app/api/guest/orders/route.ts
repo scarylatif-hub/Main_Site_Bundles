@@ -228,9 +228,11 @@ export async function POST(req: NextRequest) {
   }
 
   const providerCode =
-    deliveryResult.data.transaction_code ??
-    deliveryResult.data.reference ??
-    dakazinaRef;
+    String(
+      deliveryResult.data.transaction_code ??
+      deliveryResult.data.reference ??
+      dakazinaRef
+    );
 
   // Extract Dakazina's order code (e.g., ORDER-703436) from the response
   const dakazinaOrderCode = extractDakazinaOrderCode(

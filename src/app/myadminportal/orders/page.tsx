@@ -23,6 +23,7 @@ type DbPurchaseRow = {
   user_id: string;
   reference: string | null;
   transaction_code: string | null;
+  dakazina_order_id?: string | null;
   created_at: string;
   recipient_msisdn: string | null;
   network_id: number | null;
@@ -33,7 +34,7 @@ type DbPurchaseRow = {
 };
 
 function purchaseKeys(row: DbPurchaseRow): string[] {
-  return [row.reference, row.transaction_code, row.id]
+  return [row.dakazina_order_id, row.reference, row.transaction_code, row.id]
     .map((key) => (key != null ? String(key).trim() : ""))
     .filter(Boolean);
 }
@@ -92,7 +93,7 @@ export default async function MyAdminOrdersPage() {
   const { data: purchases, error: purchasesError } = await admin
     .from("transactions")
     .select(
-      "id,user_id,reference,transaction_code,created_at,recipient_msisdn,network_id,bundle_amount,status,amount,transaction_type"
+      "id,user_id,reference,transaction_code,dakazina_order_id,created_at,recipient_msisdn,network_id,bundle_amount,status,amount,transaction_type"
     )
     .eq("transaction_type", "purchase")
     .order("created_at", { ascending: false })

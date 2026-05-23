@@ -4,6 +4,7 @@ import { datakazinaAPI } from "@/lib/datakazina";
 import { datakazinaNetworkIdToDisplay } from "@/lib/network-id-map";
 import { getRetailPriceGhs } from "@/lib/retail-prices";
 import { NETWORKS, normalizePhoneNumber } from "@/lib/networks";
+import { extractDakazinaOrderCode } from "@/lib/dakazina-order-code";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type AdminOrderRow = {
@@ -12,11 +13,14 @@ export type AdminOrderRow = {
   reference: string | null;
   /** Provider/API order id for admin display */
   provider_order_id: string | null;
+  dakazina_order_id: string | null;
   transaction_code: string | null;
   user_id: string;
   created_at: string;
   recipient_msisdn: string | null;
   network_id: number | null;
+  paystack_transaction_id?: string | null;
+  payment_reference?: string | null;
   /** When API returns a network name string instead of id */
   network_label: string | null;
   bundle_amount: string | null;
@@ -66,6 +70,7 @@ export function adminOrderRowKeys(row: AdminOrderRow): string[] {
   return [
     row.reference,
     row.transaction_code,
+    row.dakazina_order_id,
     row.provider_order_id,
     row.id,
   ]
@@ -260,6 +265,8 @@ export function normalizeExternalOrder(
   const provider_order_id =
     provider_order_id_raw != null ? String(provider_order_id_raw) : null;
 
+  const orderCode = extractDakazinaOrderCode(o, String(provider_order_id ?? ""));
+
   const idVal = pick(o, ["id", "order_id", "orderId", "idx", "transaction_id", "transactionId"]);
   const id =
     idVal != null
@@ -268,9 +275,10 @@ export function normalizeExternalOrder(
 
   const codeVal = pick(o, [
     "transaction_id", "transactionId", "transaction_code",
-    "transactionCode", "reference", "ref", "order_reference",
+    "transactionCode", "reference", "ref", "order_reference", "order_code",
   ]);
   const transaction_code = codeVal != null ? String(codeVal) : null;
+  const dakazina_order_id = orderCode || null;
 
   const dateVal = pick(o, ["createdAt", "created_at", "date", "order_date", "timestamp"]);
   const created_at =
@@ -340,9 +348,10 @@ export function normalizeExternalOrder(
 
   return {
     id,
-    reference: transaction_code,
-    provider_order_id,
-    transaction_code,
+    reference: transaction_code || dakazina_order_id,
+    provider_order_id: dakazina_order_id || provider_order_id,
+    dakazina_order_id,
+    transaction_code: transaction_code || dakazina_order_id,
     user_id: prof?.id ?? "",
     created_at,
     recipient_msisdn,
@@ -363,6 +372,7 @@ export function transactionToAdminRow(
     user_id: string;
     reference?: string | null;
     transaction_code: string | null;
+    dakazina_order_id?: string | null;
     created_at: string;
     recipient_msisdn: string | null;
     network_id: number | null;
@@ -377,7 +387,8 @@ export function transactionToAdminRow(
   return {
     id: t.id,
     reference: ref,
-    provider_order_id: null,
+    provider_order_id: t.dakazina_order_id ?? null,
+    dakazina_order_id: t.dakazina_order_id ?? null,
     transaction_code: t.transaction_code,
     user_id: t.user_id,
     created_at: t.created_at,
@@ -410,6 +421,7 @@ export function storeOrderToAdminRow(
     customer_phone: string | null;
     created_at: string;
     paystack_transaction_id: string | null;
+    dakazina_order_id?: string | null;
   },
   storeName: string,
   bundleAmount?: string | null
@@ -418,8 +430,9 @@ export function storeOrderToAdminRow(
   const userName = order.customer_email || "Guest";
   return {
     id: order.id,
-    reference: order.paystack_transaction_id,
-    provider_order_id: null,
+    reference: order.dakazina_order_id ?? order.paystack_transaction_id,
+    provider_order_id: order.dakazina_order_id ?? null,
+    dakazina_order_id: order.dakazina_order_id ?? null,
     transaction_code: order.paystack_transaction_id,
     user_id: order.store_id,
     created_at: order.created_at,
@@ -449,6 +462,7 @@ export function buildApiOrderStatusLookup(rawOrders: unknown[]): Map<string, str
     for (const k of [
       row.reference,
       row.transaction_code,
+      row.dakazina_order_id,
       row.provider_order_id,
       row.id,
     ]) {

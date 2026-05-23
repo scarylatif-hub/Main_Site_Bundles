@@ -44,6 +44,7 @@ const networkMap = new Map(NETWORKS.map((n) => [n.id, n.name]));
 
 function overrideKey(row: AdminOrderRow): string {
   return (
+    row.dakazina_order_id ||
     row.reference ||
     row.transaction_code ||
     row.provider_order_id ||
@@ -60,6 +61,7 @@ function getNetworkLabel(row: AdminOrderRow): string {
 
 function getApiOrderId(row: AdminOrderRow): string {
   return (
+    row.dakazina_order_id ||
     row.provider_order_id ||
     row.reference ||
     row.transaction_code ||
@@ -76,6 +78,7 @@ function rowMatchesSearch(row: AdminOrderRow, term: string): boolean {
   return (
     apiId.includes(t) ||
     String(row.id).toLowerCase().includes(t) ||
+    (row.dakazina_order_id ?? "").toLowerCase().includes(t) ||
     (row.reference ?? "").toLowerCase().includes(t) ||
     (row.transaction_code ?? "").toLowerCase().includes(t) ||
     (row.provider_order_id ?? "").toLowerCase().includes(t) ||
