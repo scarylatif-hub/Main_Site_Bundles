@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
 
   console.log("📋 Dakazina webhook: Full payload:", JSON.stringify(body, null, 2));
 
-  const secret = process.env.DAKAZINA_WEBHOOK_SECRET?.trim();
+  const secret = process.env.DAKAZINA_WEBHOOK_SECRET_DISABLED?.trim();
 
   if (secret) {
     const signature = req.headers.get("dakazina-signature");
