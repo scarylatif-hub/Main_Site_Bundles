@@ -198,12 +198,23 @@ export async function POST(req: NextRequest) {
   const datakazinaNetworkId = displayNetworkIdToDatakazina(displayNetworkId);
   // Removed network ID mapping logging to prevent exposing internal logic
 
-  const purchaseParams = {
-    recipient_msisdn,
-    network_id:       datakazinaNetworkId,
-    shared_bundle:    Number(sharedBundle), // pkg.id from the package list
-    incoming_api_ref: reference,
-  };
+  // const purchaseParams = {
+  //   recipient_msisdn,
+  //   network_id:       datakazinaNetworkId,
+  //   shared_bundle:    Number(sharedBundle), // pkg.id from the package list
+  //   incoming_api_ref: reference,
+  // };
+
+  const shortRef = `SB-${Date.now()}`;
+
+const purchaseParams = {
+  recipient_msisdn,
+  network_id:       datakazinaNetworkId,
+  shared_bundle:    Number(sharedBundle),
+  incoming_api_ref: shortRef,  // ← short and clean
+};
+
+
   // removed parameter logging to prevent exposing API call details
 
   try {
@@ -245,17 +256,17 @@ export async function POST(req: NextRequest) {
     // STEP 6b — Provider accepted order; persist ORDER-xxx by transaction id
     const providerCode = extractDakazinaOrderCode(
       (result.data ?? {}) as Record<string, unknown>,
-      reference
+      shortRef
     );
 
     const patch = {
-      reference:           providerCode,
-      transaction_code:    providerCode,
-      dakazina_order_id:   providerCode,
-      // Provider accepted the order; mark as pending in DB (schema may not allow 'processing')
-      status:              "pending",
-      description:         `${description} | api_ref:${reference}`,
-    };
+  reference:           providerCode,
+  transaction_code:    providerCode,
+  dakazina_order_id:   providerCode,
+  incoming_api_ref:    shortRef,   // ← add this column if it exists, or skip
+  status:              "pending",
+  description:         `${description} | api_ref:${shortRef}`,
+};
 
     const { error: updateErr } = await admin
       .from("transactions")

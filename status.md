@@ -2,35 +2,30 @@
 
 ## Summary of Audit Results
 
-After auditing all files in the Dakazina webhook implementation, **NO BUGS WERE FOUND**. The code is already correctly implemented according to the requirements.
+After auditing all files in the Dakazina webhook implementation, **3 CRITICAL ISSUES WERE FOUND AND FIXED**. The code is now correctly implemented according to the requirements.
 
 ## Files Audited
 
-### 1. src/lib/dakazina-order-code.ts ✅ CORRECT
-- **Status**: No changes needed
-- **Findings**:
-  - `extractDakazinaOrderCode()` already checks for "transaction_code" key first (line 10)
-  - Already checks for "transactionCode" camelCase variant (line 11)
-  - Already accepts "926XXXXX" format via regex `/^926[A-Z0-9-]+$/i` (line 22)
-  - Function will correctly extract "926TEST-0020595919802" from Dakazina response
-  - Does NOT require "ORDER-XXXXX" format to consider a value valid
+### 1. src/lib/dakazina-order-code.ts ✅ FIXED
+- **Status**: FIXED - Reordered ORDER_CODE_KEYS to prioritize database values
+- **Changes Made**:
+  - Line 7-13: Reordered ORDER_CODE_KEYS from ["order_code", "orderCode", "transaction_code", "transactionCode"] to ["transaction_code", "transactionCode", "reference", "order_code", "orderCode"]
+- **Reason**: The function was extracting order_code ("ORDER-721273") from webhook payloads first, which is Dakazina's internal ID never saved in the database. This caused the primary webhook match to fail and rely on the fallback. Now it prioritizes transaction_code and reference, which are the values actually saved in the database.
+- **Impact**: Webhook matching will now work correctly on the primary search instead of relying on the fallback chain.
 
-### 2. src/app/api/buy-bundle/route.ts ✅ CORRECT
-- **Status**: No changes needed
-- **Findings**:
-  - Line 210: Calls `datakazinaAPI.purchaseDataPackage(purchaseParams, true)`
-  - Line 246-249: Extracts provider code using `extractDakazinaOrderCode()`
-  - Line 251-258: Saves transaction_code to ALL THREE database fields:
-    - `transactions.reference = providerCode`
-    - `transactions.transaction_code = providerCode`
-    - `transactions.dakazina_order_id = providerCode`
+### 2. src/app/api/buy-bundle/route.ts ✅ FIXED
+- **Status**: FIXED - Changed fallback parameter to use shortRef instead of reference
+- **Changes Made**:
+  - Line 259: Changed `extractDakazinaOrderCode((result.data ?? {}) as Record<string, unknown>, reference)` to `extractDakazinaOrderCode((result.data ?? {}) as Record<string, unknown>, shortRef)`
+- **Reason**: The fallback parameter was using the old `reference` value (loc-UUID format) instead of the new `shortRef` value (SB-timestamp format). If extractDakazinaOrderCode() failed to extract the transaction_code from Dakazina's response, it would fall back to the wrong value, causing webhook matching to fail.
+- **Impact**: If extraction fails, it now falls back to the correct SB-timestamp format that matches the incoming_api_ref sent to Dakazina.
 
-### 3. src/app/api/guest/orders/route.ts ✅ CORRECT
-- **Status**: No changes needed
-- **Findings**:
-  - Line 191: Calls `datakazinaAPI.purchaseDataPackage(purchaseParams)`
-  - Line 230-235: Extracts provider code from response
-  - Line 238-241: Saves transaction_code to `orders.dakazina_order_id`
+### 3. src/app/api/guest/orders/route.ts ✅ FIXED
+- **Status**: FIXED - Changed incoming_api_ref to use SB-timestamp format
+- **Changes Made**:
+  - Line 175: Changed `const dakazinaRef = guest-${newOrder.id};` to `const dakazinaRef = SB-${Date.now()};`
+- **Reason**: The guest/reseller store flow was using the database order ID as incoming_api_ref, which created inconsistent transaction_code formats with the main site (e.g., "926guest-12345..." vs "926SB-..."). This inconsistency could cause webhook matching issues.
+- **Impact**: Both main site and guest/reseller store flows now use the same SB-timestamp format for incoming_api_ref, ensuring consistent transaction_code generation and reliable webhook matching.
 
 ### 4. src/app/api/webhooks/dakazina/route.ts ✅ CORRECT (with logging enhancements)
 - **Status**: Enhanced with additional Vercel logging
@@ -71,7 +66,19 @@ After auditing all files in the Dakazina webhook implementation, **NO BUGS WERE 
 
 ## Files Changed
 
-Only 1 file was modified:
+3 files were modified:
+
+### src/lib/dakazina-order-code.ts
+- **Purpose**: Reordered ORDER_CODE_KEYS to prioritize database values over Dakazina internal IDs
+- **Changes**: Reordered array from ["order_code", "orderCode", "transaction_code", "transactionCode"] to ["transaction_code", "transactionCode", "reference", "order_code", "orderCode"]
+
+### src/app/api/buy-bundle/route.ts
+- **Purpose**: Fixed fallback parameter to use correct shortRef value
+- **Changes**: Changed line 259 from `reference` to `shortRef` in extractDakazinaOrderCode call
+
+### src/app/api/guest/orders/route.ts
+- **Purpose**: Standardized incoming_api_ref format across main site and guest flows
+- **Changes**: Changed line 175 from `guest-${newOrder.id}` to `SB-${Date.now()}`
 
 ### src/app/api/webhooks/dakazina/route.ts
 - **Purpose**: Added enhanced Vercel logging for debugging webhook processing

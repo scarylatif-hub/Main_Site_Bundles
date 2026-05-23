@@ -172,7 +172,7 @@ export async function POST(req: NextRequest) {
   }
 
   // 8. Call DataKazina (with retry)
-  const dakazinaRef = `guest-${newOrder.id}`;
+  const dakazinaRef = `SB-${Date.now()}`;
 
   // Map display network ID to DataKazina network ID
   const datakazinaNetworkId = displayNetworkIdToDatakazina(Number(network_id));

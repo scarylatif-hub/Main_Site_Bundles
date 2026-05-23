@@ -5,10 +5,11 @@
  */
 
 const ORDER_CODE_KEYS = [
+  "transaction_code",
+  "transactionCode",
+  "reference",
   "order_code",
   "orderCode",
-  "transaction_code",   // ← ADD THIS — this is what Dakazina actually returns
-  "transactionCode",    // ← ADD THIS — camelCase variant
 ] as const;
 
 const ORDER_CODE_IN_TEXT_RE = /\b(ORDER-\d+|DKZ-[A-Z0-9-]+)\b/i;
