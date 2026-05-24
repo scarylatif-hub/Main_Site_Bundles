@@ -263,7 +263,6 @@ const purchaseParams = {
   reference:           providerCode,
   transaction_code:    providerCode,
   dakazina_order_id:   providerCode,
-  incoming_api_ref:    shortRef,   // ← add this column if it exists, or skip
   status:              "pending",
   description:         `${description} | api_ref:${shortRef}`,
 };
