@@ -1,31 +1,28 @@
 export function normalizeStatusForEarnings(raw: unknown): string {
   const status = String(raw ?? "").trim().toLowerCase();
 
-  // DELIVERED → success (only allowed completed status in transactions table)
   if (["delivered", "completed", "success"].includes(status)) {
-    return "success";
+    return "delivered";   // shows "Delivered" to customer
   }
 
-  // PROCESSING → pending (closest allowed value)
-  if (["processing", "pending", "in_progress", "in-progress", "placed"].includes(status)) {
-    return "pending";
+  if (["processing", "in_progress", "in-progress", "placed"].includes(status)) {
+    return "processing";  // shows "Processing" to customer
   }
 
-  // FAILED → failed
   if (["failed", "failure", "error", "cancelled", "canceled"].includes(status)) {
     return "failed";
   }
 
-  return "pending"; // safe default
+  return "pending"; // order just placed, waiting for Dakazina
 }
 
 export function isSuccessfulEarningStatus(raw: unknown): boolean {
-  return normalizeStatusForEarnings(raw) === "success";
+  return normalizeStatusForEarnings(raw) === "delivered";
 }
 
 export function isAccruedEarningStatus(raw: unknown): boolean {
   const normalized = normalizeStatusForEarnings(raw);
-  return normalized === "success" || normalized === "pending";
+  return normalized === "delivered" || normalized === "processing";
 }
 
 export function computeResellerProfitGhs(input: {
