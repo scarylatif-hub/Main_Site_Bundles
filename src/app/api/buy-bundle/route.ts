@@ -2,10 +2,6 @@
  * src/app/api/buy-bundle/route.ts
  *
  * Authenticated wallet purchase using DataKazina /buy-data-package.
- *
- * Because the DataKazina response body is undocumented, we treat any
- * 2xx HTTP status as a successful delivery. The raw response is logged
- * so you can see the real shape the first time a purchase goes through.
  */
 
 import { NextRequest, NextResponse }   from "next/server";
@@ -13,26 +9,25 @@ import { createClient }                 from "@/lib/supabase/server";
 import { createAdminClient }            from "@/lib/supabase/admin";
 import type { SupabaseClient }          from "@supabase/supabase-js";
 import { datakazinaAPI }                from "@/lib/datakazina";
-import { normalizePhoneNumber } from "@/lib/networks";
-import { extractDakazinaOrderCode } from "@/lib/dakazina-order-code";
+import { normalizePhoneNumber }         from "@/lib/networks";
+import { extractDakazinaOrderCode }     from "@/lib/dakazina-order-code";
 import {
   displayNetworkIdToDatakazina,
   resolveDisplayNetworkId,
 } from "@/lib/network-id-map";
-import { notifyAdminBundlePurchase } from "@/lib/server/notifications";
+import { notifyAdminBundlePurchase }    from "@/lib/server/notifications";
 
 // ntfy configuration
 const NTFY_TOPIC = process.env.NTFY_TOPIC || "bundle-ghana";
-const NTFY_URL = `https://ntfy.sh/${NTFY_TOPIC}`;
+const NTFY_URL   = `https://ntfy.sh/${NTFY_TOPIC}`;
 
 async function sendNtfyNotification(title: string, message: string) {
   try {
-    // HTTP headers must be ASCII-safe; strip non-ASCII (emoji) to avoid ByteString errors
     const asciiTitle = String(title).replace(/[^\x20-\x7E]/g, "").trim() || "Notification";
     await fetch(NTFY_URL, {
       method: "POST",
       headers: {
-        "Title": asciiTitle,
+        "Title":    asciiTitle,
         "Priority": "high",
       },
       body: message,
@@ -45,11 +40,11 @@ async function sendNtfyNotification(title: string, message: string) {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function abortPendingPurchase(
-  admin:           SupabaseClient,
-  userId:          string,
-  transactionId:   string,
-  restoreBalance:  number,
-  reason:          string
+  admin:          SupabaseClient,
+  userId:         string,
+  transactionId:  string,
+  restoreBalance: number,
+  reason:         string
 ): Promise<void> {
   console.error(`[buy-bundle][ABORT] ${reason}`);
   await Promise.all([
@@ -93,7 +88,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { recipientMsisdn, networkId, networkName, sharedBundle, price, dataAmount } = body as {
+  const {
+    recipientMsisdn,
+    networkId,
+    networkName,
+    sharedBundle,
+    price,
+    dataAmount,
+  } = body as {
     recipientMsisdn?: unknown;
     networkId?:       unknown;
     networkName?:     unknown;
@@ -101,8 +103,6 @@ export async function POST(req: NextRequest) {
     price?:           unknown;
     dataAmount?:      unknown;
   };
-
-  // Removed body logging to prevent exposing sensitive data in console
 
   if (!recipientMsisdn || networkId == null || sharedBundle == null || price == null || !dataAmount) {
     console.error("[buy-bundle][STEP-2] Missing fields");
@@ -134,7 +134,6 @@ export async function POST(req: NextRequest) {
   }
 
   const balanceBefore = Number(profile.wallet_balance);
-  // Removed balance logging to prevent exposing financial data in console
 
   if (balanceBefore < p) {
     return NextResponse.json(
@@ -145,6 +144,7 @@ export async function POST(req: NextRequest) {
 
   // STEP 4 — Debit wallet + insert pending transaction
   const reference   = `loc-${crypto.randomUUID()}`;
+  const shortRef    = `SB-${Date.now()}`;
   const description = `Purchase of ${dataAmount} for ${recipient_msisdn}`;
 
   const { error: walletErr } = await admin
@@ -158,9 +158,8 @@ export async function POST(req: NextRequest) {
   }
 
   const displayNetworkId = resolveDisplayNetworkId({
-    displayNetworkId: Number(networkId),
-    displayNetworkName:
-      networkName != null ? String(networkName) : undefined,
+    displayNetworkId:   Number(networkId),
+    displayNetworkName: networkName != null ? String(networkName) : undefined,
   });
 
   const { data: insertedRow, error: insertErr } = await admin
@@ -194,34 +193,27 @@ export async function POST(req: NextRequest) {
 
   const transactionId = insertedRow.id;
 
-  // STEP 5 — Call DataKazina /buy-data-package (main console)
+  // STEP 5 — Call DataKazina /buy-data-package
   const datakazinaNetworkId = displayNetworkIdToDatakazina(displayNetworkId);
-  // Removed network ID mapping logging to prevent exposing internal logic
 
-  // const purchaseParams = {
-  //   recipient_msisdn,
-  //   network_id:       datakazinaNetworkId,
-  //   shared_bundle:    Number(sharedBundle), // pkg.id from the package list
-  //   incoming_api_ref: reference,
-  // };
+  const purchaseParams = {
+    recipient_msisdn,
+    network_id:       datakazinaNetworkId,
+    shared_bundle:    Number(sharedBundle),
+    incoming_api_ref: shortRef,  // short clean ref e.g. SB-1716508336000
+  };
 
-  const shortRef = `SB-${Date.now()}`;
+  // Parse dataAmount to check bundle size (e.g., "20 GB" -> 20)
+  const sizeMatch = String(dataAmount).match(/(\d+(?:\.\d+)?)/);
+  const sizeGb = sizeMatch ? parseFloat(sizeMatch[1]) : 0;
+  const isLargeBundle = sizeGb >= 20;
 
-const purchaseParams = {
-  recipient_msisdn,
-  network_id:       datakazinaNetworkId,
-  shared_bundle:    Number(sharedBundle),
-  incoming_api_ref: shortRef,  // ← short and clean
-};
-
-
-  // removed parameter logging to prevent exposing API call details
+  // For MTN bundles >= 20GB, use base endpoint instead of main endpoint
+  // (main endpoint may not support large MTN bundles)
+  const useMainEndpoint = !(displayNetworkId === 1 && isLargeBundle);
 
   try {
-    const result = await datakazinaAPI.purchaseDataPackage(purchaseParams, true);
-
-    // Log the full raw response so we learn what DataKazina actually returns
-    // Removed response logging to prevent exposing API responses in console
+    const result = await datakazinaAPI.purchaseDataPackage(purchaseParams, useMainEndpoint);
 
     // STEP 6a — Provider error
     if (!result.ok) {
@@ -234,8 +226,7 @@ const purchaseParams = {
         await admin
           .from("transactions")
           .update({
-            // Use DB-safe status value; some DB schemas enforce 'pending'|'completed'|'failed'
-            status: "pending",
+            status:      "pending",
             description: `${description} (duplicate acknowledged)`,
           })
           .eq("id", transactionId);
@@ -253,19 +244,21 @@ const purchaseParams = {
       );
     }
 
-    // STEP 6b — Provider accepted order; persist ORDER-xxx by transaction id
+    // STEP 6b — Provider accepted; save Dakazina transaction code to database
     const providerCode = extractDakazinaOrderCode(
       (result.data ?? {}) as Record<string, unknown>,
-      shortRef
+      shortRef  // fallback to shortRef (SB-XXXXX), NOT the internal loc-UUID
     );
 
+    console.log("[buy-bundle][STEP-6b] providerCode to save:", providerCode);
+
     const patch = {
-  reference:           providerCode,
-  transaction_code:    providerCode,
-  dakazina_order_id:   providerCode,
-  status:              "pending",
-  description:         `${description} | api_ref:${shortRef}`,
-};
+      reference:         providerCode,
+      transaction_code:  providerCode,
+      dakazina_order_id: providerCode,
+      status:            "pending",
+      description:       `${description} | api_ref:${shortRef}`,
+    };
 
     const { error: updateErr } = await admin
       .from("transactions")
@@ -275,6 +268,8 @@ const purchaseParams = {
     if (updateErr) {
       console.error("[buy-bundle][STEP-6b] Transaction update failed:", updateErr);
       // Provider already placed the order — do not fail checkout
+    } else {
+      console.log("[buy-bundle][STEP-6b] Successfully saved dakazina_order_id:", providerCode);
     }
 
     void notifyAdminBundlePurchase({
@@ -298,10 +293,10 @@ Amount Paid: GHS ${p.toFixed(2)}
 Transaction Code: ${providerCode}
 
 ⏰ Completed: ${new Date().toISOString()}
-  `.trim();
+    `.trim();
 
     void sendNtfyNotification(
-      `🛒 Purchase: GHS ${p.toFixed(2)} - User ${user.id}`,
+      `Purchase: GHS ${p.toFixed(2)} - User ${user.id}`,
       ntfyMessage
     );
 
