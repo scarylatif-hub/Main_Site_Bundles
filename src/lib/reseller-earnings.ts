@@ -2,18 +2,18 @@ export function normalizeStatusForEarnings(raw: unknown): string {
   const status = String(raw ?? "").trim().toLowerCase();
 
   if (["delivered", "completed", "success"].includes(status)) {
-    return "delivered";   // shows "Delivered" to customer
+    return "delivered";
   }
 
-  if (["processing", "in_progress", "in-progress", "placed"].includes(status)) {
-    return "processing";  // shows "Processing" to customer
+  if (["processing", "pending", "in_progress", "in-progress", "placed"].includes(status)) {
+    return "processing";
   }
 
   if (["failed", "failure", "error", "cancelled", "canceled"].includes(status)) {
     return "failed";
   }
 
-  return "pending"; // order just placed, waiting for Dakazina
+  return "pending";
 }
 
 export function isSuccessfulEarningStatus(raw: unknown): boolean {
