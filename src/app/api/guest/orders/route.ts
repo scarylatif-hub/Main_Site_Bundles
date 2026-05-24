@@ -204,6 +204,8 @@ export async function POST(req: NextRequest) {
     2_000
   );
 
+  console.log("[guest/orders] deliveryResult:", JSON.stringify(deliveryResult));
+
   // 9. Handle delivery outcome
   if (!deliveryResult.success) {
     console.error("[guest/orders] All retries exhausted for order", newOrder.id, deliveryResult.error);
