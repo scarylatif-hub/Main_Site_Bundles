@@ -28,7 +28,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const amountInKobo = toPaystackAmount(amount);
+    // Calculate Paystack fee (1.5% of the amount)
+    const originalAmount = Number(amount);
+    const paystackFee = originalAmount * 0.015;
+    const totalAmount = originalAmount + paystackFee;
+
+    const amountInKobo = toPaystackAmount(totalAmount);
 
     // Prepare Paystack request
     const paystackUrl = 'https://api.paystack.co/transaction/initialize';
@@ -41,6 +46,9 @@ export async function POST(request: NextRequest) {
         ...metadata,
         type: 'store_purchase',
         timestamp: new Date().toISOString(),
+        original_amount: originalAmount,
+        paystack_fee: paystackFee,
+        total_amount: totalAmount,
       },
     };
 
@@ -73,11 +81,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Return authorization details to client
+    // Return authorization details to client along with fee information
     return NextResponse.json({
       authorizationUrl: result.data.authorization_url,
       accessCode: result.data.access_code,
       reference,
+      originalAmount: originalAmount,
+      paystackFee: paystackFee.toFixed(2),
+      totalAmount: totalAmount.toFixed(2),
     });
   } catch (error) {
     console.error('Error in POST /api/paystack/guest/initialize:', error);

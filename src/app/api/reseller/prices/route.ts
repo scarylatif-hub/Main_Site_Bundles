@@ -47,6 +47,48 @@ export async function POST(req: NextRequest) {
 
     const admin = createAdminClient();
 
+    // Fetch main packages to get minimum allowed prices (API price + profit margin)
+    const { data: mainPackages, error: packagesError } = await admin
+      .from("packages")
+      .select("id, price");
+
+    if (packagesError) {
+      console.error("Fetch packages error:", packagesError);
+      return NextResponse.json({ error: "Failed to fetch packages" }, { status: 500 });
+    }
+
+    // Create a map of package_id to minimum allowed price
+    const minPriceMap = new Map<number, number>();
+    for (const pkg of mainPackages ?? []) {
+      minPriceMap.set(pkg.id, Number(pkg.price));
+    }
+
+    // Validate each price
+    for (const price of prices) {
+      const packageId = Number(price.package_id);
+      const storePrice = Number(price.price);
+      const minPrice = minPriceMap.get(packageId);
+
+      if (minPrice === undefined) {
+        return NextResponse.json(
+          { error: `Package ID ${packageId} not found` },
+          { status: 400 }
+        );
+      }
+
+      if (storePrice < minPrice) {
+        return NextResponse.json(
+          {
+            error: `Price for package ${packageId} cannot be below ${minPrice.toFixed(2)} (main API price + profit margin)`,
+            package_id: packageId,
+            minimum_price: minPrice,
+            provided_price: storePrice,
+          },
+          { status: 400 }
+        );
+      }
+    }
+
     const { error } = await admin
       .from("reseller_prices")
       .upsert(prices, {
