@@ -2,6 +2,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { datakazinaAPI } from "@/lib/datakazina";
 import { redirect } from "next/navigation";
 import { datakazinaNetworkIdToDisplay } from "@/lib/network-id-map";
+import { getMinimumPrice } from "@/lib/minimum-prices";
+import {
+  formatDataPackageLabel,
+  isConsumerDataBundle,
+  parseDataPackageVolumeGb,
+} from "@/lib/package-display";
 import StoreClient from "./store-client";
 
 export const dynamic = "force-dynamic";
@@ -60,10 +66,15 @@ export default async function StorePage({
   const profitMargin = Number(storeOwner.profit_margin || 0.05);
 
   let packages = pkgResult.data
-    ? pkgResult.data.map((pkg: any) => {
+    ? pkgResult.data.flatMap((pkg: any) => {
+        if (!isConsumerDataBundle(pkg)) return [];
+
+        const volumeGb = parseDataPackageVolumeGb(pkg);
+        if (volumeGb == null) return [];
+
         // Use retail price from retail-prices.ts and apply tiered admin profit margin
         const displayNetworkId = datakazinaNetworkIdToDisplay(Number(pkg.network_id));
-        const sharedBundle = Number(pkg.volume || pkg.shared_bundle);
+        const sharedBundle = volumeGb;
         
         // Import retail prices function
         const retailPrices = require("@/lib/retail-prices");
@@ -80,24 +91,30 @@ export default async function StorePage({
         }
         
         const adminPrice = retailPrice * (1 + adminProfitMargin);
+        const networkName =
+          displayNetworkId === 2
+            ? "TELECEL"
+            : displayNetworkId === 3
+              ? "AIRTELTIGO"
+              : "MTN";
+        const mainSitePrice = getMinimumPrice(networkName, sharedBundle) ?? adminPrice;
 
         // Use custom price if available, otherwise calculate with store owner profit margin on top of admin price
-        const sellingPrice = customPriceMap.get(Number(pkg.id)) || (adminPrice * (1 + profitMargin));
+        const customPrice = customPriceMap.get(Number(pkg.id));
+        const defaultStorePrice = adminPrice * (1 + profitMargin);
+        const sellingPrice = Math.max(
+          Number(customPrice ?? defaultStorePrice),
+          mainSitePrice
+        );
 
-        // Use volumeGB field for display (e.g., "2GB", "3GB")
-        const displayName =
-          pkg.volumeGB ||
-          `${pkg.volume}GB` ||
-          pkg.name ||
-          pkg.description ||
-          `Package ${pkg.id}`;
+        const displayName = formatDataPackageLabel(pkg, volumeGb);
 
         return {
           id: pkg.id,
           network_id: displayNetworkId,
           name: displayName,
           data_amount: displayName,
-          cost_price: adminPrice,
+          cost_price: mainSitePrice,
           selling_price: sellingPrice,
           validity: pkg.validity || "30 days",
           sharedBundle: sharedBundle,

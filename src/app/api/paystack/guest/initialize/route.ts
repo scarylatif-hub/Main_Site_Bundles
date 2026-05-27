@@ -4,19 +4,38 @@ import { toPaystackAmount } from '@/lib/paystack-config';
 export const dynamic = 'force-dynamic';
 
 /**
+ * Generate unique transaction reference for store purchases
+ * Similar pattern to main site but for guest/store purchases
+ */
+function generateStoreReference(phoneNumber: string, storeId: string): string {
+  const timestamp = Date.now();
+  const random = Math.random().toString(36).substring(2, 8).toUpperCase();
+  const phoneSuffix = phoneNumber.replace(/\D/g, '').slice(-6); // Last 6 digits of phone
+  const storeSuffix = storeId.slice(-6); // Last 6 chars of store ID
+  return `STORE_${phoneSuffix}_${storeSuffix}_${timestamp}_${random}`;
+}
+
+/**
  * POST /api/paystack/guest/initialize
  * Initialize a Paystack payment for guest store purchases (no authentication required)
  */
 export async function POST(request: NextRequest) {
   try {
-    const { amount, email, reference, metadata } = await request.json();
+    const { amount, email, metadata, callbackUrl } = await request.json();
 
-    if (!amount || !email || !reference) {
+    if (!amount || !email) {
       return NextResponse.json(
         { error: 'Missing required fields' },
         { status: 400 }
       );
     }
+
+    // Extract phone number and store ID from metadata for unique reference generation
+    const phoneNumber = metadata?.phone_number || '';
+    const storeId = metadata?.store_id || '';
+
+    // Generate unique reference using phone number and store ID
+    const reference = generateStoreReference(phoneNumber, storeId);
 
     const paystackSecretKey = process.env.PAYSTACK_SECRET_KEY;
 
@@ -42,6 +61,9 @@ export async function POST(request: NextRequest) {
       amount: amountInKobo,
       reference,
       currency: 'GHS',
+      ...(typeof callbackUrl === 'string' && callbackUrl.startsWith('http')
+        ? { callback_url: callbackUrl }
+        : {}),
       metadata: {
         ...metadata,
         type: 'store_purchase',
@@ -49,6 +71,7 @@ export async function POST(request: NextRequest) {
         original_amount: originalAmount,
         paystack_fee: paystackFee,
         total_amount: totalAmount,
+        customer_phone: phoneNumber,
       },
     };
 
@@ -66,7 +89,7 @@ export async function POST(request: NextRequest) {
       const errorData = await response.json();
       console.error('Paystack error:', errorData);
       return NextResponse.json(
-        { error: 'Failed to initialize payment with Paystack' },
+        { error: 'Failed to initialize payment with Paystack', details: errorData },
         { status: response.status }
       );
     }
@@ -76,7 +99,7 @@ export async function POST(request: NextRequest) {
     if (!result.status) {
       console.error('Paystack returned non-success status:', result);
       return NextResponse.json(
-        { error: 'Payment initialization failed' },
+        { error: 'Payment initialization failed', details: result },
         { status: 400 }
       );
     }

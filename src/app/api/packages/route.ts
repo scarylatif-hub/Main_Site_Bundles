@@ -36,6 +36,7 @@ function mapDataKazinaPackages(raw: unknown[]): unknown[] {
         ? datakazinaNetworkIdToDisplay(Math.trunc(rawNetId))
         : 1);
     const netFromId = NETWORKS.find((n) => n.id === displayNetId);
+    console.log("[packages] Package ID:", packageId, "providerLabel:", providerLabel, "rawNetId:", rawNetId, "displayNetId:", displayNetId);
 
     let networkName = (netFromId?.name || providerLabel || 'MTN') as NetworkName;
     if (

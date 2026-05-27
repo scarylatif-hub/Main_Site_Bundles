@@ -9,10 +9,13 @@
  * - AirtelTigo (AT - BigTime): 2
  */
 export function datakazinaNetworkIdToDisplay(datakazinaNetworkId: number): number {
+  if (datakazinaNetworkId === 5) return 1;
   if (datakazinaNetworkId === 3) return 1;  // DataKazina MTN → Display MTN
   if (datakazinaNetworkId === 4) return 2;  // DataKazina Telecel → Display Telecel
   if (datakazinaNetworkId === 1) return 3;  // DataKazina AT-iSHare → Display AirtelTigo
   if (datakazinaNetworkId === 2) return 3;  // DataKazina AT-BigTime → Display AirtelTigo
+  // If unknown network_id, don't default to MTN (1), return as-is to avoid misrouting
+  console.warn(`[network-id-map] Unknown DataKazina network_id: ${datakazinaNetworkId}`);
   return datakazinaNetworkId;
 }
 

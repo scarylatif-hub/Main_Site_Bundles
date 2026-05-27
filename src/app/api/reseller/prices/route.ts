@@ -1,6 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { datakazinaAPI } from "@/lib/datakazina";
+import { datakazinaNetworkIdToDisplay } from "@/lib/network-id-map";
+import { getMinimumPrice } from "@/lib/minimum-prices";
+
+async function buildMinimumPriceMap(): Promise<Map<number, number>> {
+  const pkgResult = await datakazinaAPI.fetchDataPackages();
+  if (!pkgResult.ok || !pkgResult.data) {
+    throw new Error("Failed to fetch packages from provider");
+  }
+
+  const minPriceMap = new Map<number, number>();
+  for (const pkg of pkgResult.data) {
+    const packageId = Number(pkg.id);
+    const displayNetworkId = datakazinaNetworkIdToDisplay(Number(pkg.network_id));
+    const bundleSize = Number(pkg.volume || pkg.shared_bundle || 0);
+    const networkName =
+      displayNetworkId === 2
+        ? "TELECEL"
+        : displayNetworkId === 3
+          ? "AIRTELTIGO"
+          : "MTN";
+    const minPrice = getMinimumPrice(networkName, bundleSize);
+    if (minPrice !== null) {
+      minPriceMap.set(packageId, minPrice);
+    }
+  }
+  return minPriceMap;
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -23,8 +51,20 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Failed to fetch prices" }, { status: 500 });
     }
 
-    console.log("Fetched prices for user:", user.id, "data:", data);
-    return NextResponse.json(data || []);
+    const minPriceMap = await buildMinimumPriceMap();
+    const safePrices = (data || []).map((price) => {
+      const minPrice = minPriceMap.get(Number(price.package_id));
+      return {
+        ...price,
+        selling_price:
+          minPrice == null
+            ? Number(price.selling_price)
+            : Math.max(Number(price.selling_price), minPrice),
+      };
+    });
+
+    console.log("Fetched prices for user:", user.id, "data:", safePrices);
+    return NextResponse.json(safePrices);
   } catch (error) {
     console.error("Fetch prices error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
@@ -47,31 +87,31 @@ export async function POST(req: NextRequest) {
 
     const admin = createAdminClient();
 
-    // Fetch main packages to get minimum allowed prices (API price + profit margin)
-    const { data: mainPackages, error: packagesError } = await admin
-      .from("packages")
-      .select("id, price");
+    const minPriceMap = await buildMinimumPriceMap();
 
-    if (packagesError) {
-      console.error("Fetch packages error:", packagesError);
-      return NextResponse.json({ error: "Failed to fetch packages" }, { status: 500 });
-    }
-
-    // Create a map of package_id to minimum allowed price
-    const minPriceMap = new Map<number, number>();
-    for (const pkg of mainPackages ?? []) {
-      minPriceMap.set(pkg.id, Number(pkg.price));
-    }
-
-    // Validate each price
+    // Validate each price. The client sends `selling_price`; keep `price`
+    // as a backward-compatible fallback for older callers.
+    const sanitizedPrices = [];
     for (const price of prices) {
       const packageId = Number(price.package_id);
-      const storePrice = Number(price.price);
+      const storePrice = Number(price.selling_price ?? price.price);
       const minPrice = minPriceMap.get(packageId);
+
+      if (
+        !Number.isInteger(packageId) ||
+        packageId <= 0 ||
+        !Number.isFinite(storePrice) ||
+        storePrice <= 0
+      ) {
+        return NextResponse.json(
+          { error: "Invalid package or selling price" },
+          { status: 400 }
+        );
+      }
 
       if (minPrice === undefined) {
         return NextResponse.json(
-          { error: `Package ID ${packageId} not found` },
+          { error: `Package ID ${packageId} not found or minimum price not defined` },
           { status: 400 }
         );
       }
@@ -79,7 +119,7 @@ export async function POST(req: NextRequest) {
       if (storePrice < minPrice) {
         return NextResponse.json(
           {
-            error: `Price for package ${packageId} cannot be below ${minPrice.toFixed(2)} (main API price + profit margin)`,
+            error: `Price for package ${packageId} cannot be below GHS ${minPrice.toFixed(2)} (main site price)`,
             package_id: packageId,
             minimum_price: minPrice,
             provided_price: storePrice,
@@ -87,11 +127,18 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
+
+      sanitizedPrices.push({
+        reseller_id: user.id,
+        package_id: packageId,
+        network_id: Number(price.network_id) || null,
+        selling_price: Math.round(storePrice * 100) / 100,
+      });
     }
 
     const { error } = await admin
       .from("reseller_prices")
-      .upsert(prices, {
+      .upsert(sanitizedPrices, {
         onConflict: "reseller_id,package_id",
       });
 

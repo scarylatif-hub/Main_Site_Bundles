@@ -176,7 +176,7 @@ export async function POST(req: NextRequest) {
 
   // Map display network ID to DataKazina network ID
   const datakazinaNetworkId = displayNetworkIdToDatakazina(Number(network_id));
-  // Removed network mapping logging to prevent exposing internal logic
+  console.log("[guest/orders] Network mapping - displayNetworkId:", network_id, "-> datakazinaNetworkId:", datakazinaNetworkId);
 
   const purchaseParams = {
     recipient_msisdn,

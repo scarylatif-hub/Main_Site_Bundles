@@ -1,5 +1,7 @@
-const NON_DATA_LABEL_RE =
-  /registration|sim\s*reg|router|combo|voice|minute|sms|special/i;
+const NON_DATA_LABEL_RE = new RegExp(
+  "registration|sim\\s*reg|router|combo|voice|minute|sms|special",
+  "i"
+);
 
 export function parseDataPackageVolumeGb(
   pkg: Record<string, unknown>

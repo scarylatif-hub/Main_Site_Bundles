@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { toast } from "@/hooks/use-toast";
 import type { Profile } from "@/lib/definitions";
 import { useMaintenanceMode } from "@/hooks/use-maintenance-mode";
@@ -53,8 +53,6 @@ const NETWORK_MAP: Record<number, { label: string; color: string; bg: string; do
 
 const ALLOWED_NETWORKS = [1, 2, 3];
 
-declare global { interface Window { PaystackPop: any; } }
-
 // ── Cookie helpers ────────────────────────────────────────────────────────────
 
 function setCookie(name: string, value: string, days: number) {
@@ -89,6 +87,19 @@ function formatPhone(raw: string): string {
   return v.slice(0, 10);
 }
 
+const PENDING_STORE_PAYMENT_KEY = "pending_store_payment";
+
+type PendingStorePayment = {
+  reference: string;
+  store_id: string;
+  package_id: number;
+  network_id: number;
+  phone_number: string;
+  email: string;
+  amount: number;
+  data_amount: string;
+};
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function StoreClient({ storeOwner, packages }: StoreClientProps) {
@@ -103,6 +114,7 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
   const [loadingOrders, setLoadingOrders] = useState(false);
   const [showConfirm, setShowConfirm]   = useState(false);
   const [step, setStep]                 = useState<"phone" | "packages">("phone");
+  const completingReturnRef = useRef(false);
   const { isMaintenance } = useMaintenanceMode();
 
   // Theme from store owner
@@ -116,6 +128,72 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
     const savedName  = getCookie("store_nickname");
     if (savedPhone) { setPhone(savedPhone); handlePhoneDetect(savedPhone); setStep("packages"); }
     if (savedName)  setName(savedName);
+  }, []);
+
+  useEffect(() => {
+    if (completingReturnRef.current) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const reference = params.get("reference") || params.get("trxref");
+    if (!reference) return;
+
+    const pendingRaw = sessionStorage.getItem(PENDING_STORE_PAYMENT_KEY);
+    if (!pendingRaw) {
+      toast({
+        title: "Payment received",
+        description: "We could not find the pending order on this browser. Contact support with your Paystack reference.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    let pending: PendingStorePayment;
+    try {
+      pending = JSON.parse(pendingRaw) as PendingStorePayment;
+    } catch {
+      sessionStorage.removeItem(PENDING_STORE_PAYMENT_KEY);
+      return;
+    }
+
+    if (pending.reference !== reference) return;
+
+    completingReturnRef.current = true;
+    setPurchasing(true);
+    fetch("/api/guest/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        store_id:          pending.store_id,
+        package_id:        pending.package_id,
+        network_id:        pending.network_id,
+        phone_number:      pending.phone_number,
+        email:             pending.email,
+        amount:            pending.amount,
+        payment_reference: pending.reference,
+      }),
+    })
+      .then((r) => r.json().then((data) => ({ ok: r.ok, data })))
+      .then(({ ok, data }) => {
+        if (!ok || data.error) throw new Error(data.error || "Could not complete order");
+        sessionStorage.removeItem(PENDING_STORE_PAYMENT_KEY);
+        toast({
+          title: "Data Sent!",
+          description: `${pending.data_amount} is on its way to ${pending.phone_number}.`,
+        });
+        setPhone(pending.phone_number);
+        loadOrders(pending.phone_number);
+        window.history.replaceState(null, "", window.location.pathname);
+      })
+      .catch((err) => {
+        toast({
+          title: "Purchase failed",
+          description: err instanceof Error ? err.message : "Could not complete order",
+          variant: "destructive",
+        });
+      })
+      .finally(() => {
+        setPurchasing(false);
+      });
   }, []);
 
   function handlePhoneDetect(val: string) {
@@ -168,11 +246,11 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
 
   async function handlePurchase() {
     if (!selectedPkg || !phone) return;
+    if (purchasing) return;
     setShowConfirm(false);
     setPurchasing(true);
 
-    const email = name?.includes("@") ? name : `${phone}@store.bundleghana.com`;
-    const reference = `store-${storeOwner.id}-${Date.now()}`;
+    const email = name?.includes("@") ? name : `${phone}@gmail.com`;
 
     try {
       const init = await fetch("/api/paystack/guest/initialize", {
@@ -181,7 +259,7 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
         body: JSON.stringify({
           amount: selectedPkg.selling_price,
           email,
-          reference,
+          callbackUrl: `${window.location.origin}/store/${storeOwner.reseller_slug}`,
           metadata: {
             store_id:     storeOwner.id,
             package_id:   selectedPkg.id,
@@ -192,60 +270,26 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
         }),
       });
 
-      if (!init.ok) throw new Error("Failed to initialize payment");
-
-      const pk = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY;
-      if (!pk) throw new Error("Payment not configured");
-
-      if (!window.PaystackPop) {
-        await new Promise<void>((res, rej) => {
-          const s = document.createElement("script");
-          s.src = "https://js.paystack.co/v1/inline.js";
-          s.onload = () => res();
-          s.onerror = () => rej(new Error("Paystack load failed"));
-          document.head.appendChild(s);
-        });
+      const initData = await init.json();
+      if (!init.ok || !initData.authorizationUrl || !initData.reference) {
+        throw new Error(initData.error || "Failed to initialize payment");
       }
 
-      const handler = window.PaystackPop.setup({
-        key:      pk,
-        email,
-        amount:   Math.round(selectedPkg.selling_price * 100),
-        ref:      reference,
-        currency: "GHS",
-        onClose: () => {
-          setPurchasing(false);
-          toast({ title: "Payment cancelled", variant: "destructive" });
-        },
-        callback: (response: any) => {
-          fetch("/api/guest/orders", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              store_id:          storeOwner.id,
-              package_id:        selectedPkg.id,
-              network_id:        selectedPkg.network_id,
-              phone_number:      phone,
-              email:             name,
-              amount:            selectedPkg.selling_price,
-              payment_reference: reference,
-            }),
-          })
-          .then(r => r.json())
-          .then(data => {
-            if (data.error) throw new Error(data.error);
-            toast({ title: "🎉 Data Sent!", description: `${selectedPkg.data_amount} is on its way to ${phone}.` });
-            setSelectedPkg(null);
-            loadOrders(phone);
-          })
-          .catch(err => {
-            toast({ title: "Purchase failed", description: err.message, variant: "destructive" });
-          })
-          .finally(() => setPurchasing(false));
-        },
-      });
+      const reference = initData.reference;
 
-      handler.openIframe();
+      const pending: PendingStorePayment = {
+        reference,
+        store_id: storeOwner.id,
+        package_id: selectedPkg.id,
+        network_id: selectedPkg.network_id,
+        phone_number: phone,
+        email,
+        amount: selectedPkg.selling_price,
+        data_amount: selectedPkg.data_amount || selectedPkg.name,
+      };
+      sessionStorage.setItem(PENDING_STORE_PAYMENT_KEY, JSON.stringify(pending));
+      window.location.href = initData.authorizationUrl;
+      return;
     } catch (err) {
       toast({ title: "Payment failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
       setPurchasing(false);

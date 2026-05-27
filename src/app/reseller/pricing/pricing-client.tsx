@@ -36,7 +36,9 @@ export default function PricingClient({
   const [isEditing, setIsEditing] = useState(false);
   const [customPrices, setCustomPrices] = useState<Record<string, number>>({});
   const [hasChanges, setHasChanges] = useState(false);
-  const [profitMargin, setProfitMargin] = useState<number>(currentMarkup * 100 || 20); // Convert to percentage
+  const [profitMargin, setProfitMargin] = useState<number>(
+    Math.max(0, currentMarkup * 100 || 20)
+  );
 
   useEffect(() => {
     const fetchPackages = async () => {
@@ -53,9 +55,21 @@ export default function PricingClient({
         
         if (pricesResponse.ok) {
           const pricesData = await pricesResponse.json();
+          const packageMap = new Map(
+            (Array.isArray(packagesData) ? packagesData : []).map((pkg: Package) => [
+              String(pkg.id),
+              pkg,
+            ])
+          );
           const priceMap: Record<string, number> = {};
           (pricesData || []).forEach((price: ResellerPrice) => {
-            priceMap[String(price.package_id)] = price.selling_price;
+            const packageId = String(price.package_id);
+            const pkg = packageMap.get(packageId);
+            const minimumPrice = pkg ? Number(pkg.price) : 0;
+            priceMap[packageId] = Math.max(
+              Number(price.selling_price),
+              minimumPrice
+            );
           });
           setCustomPrices(priceMap);
         }
@@ -84,10 +98,23 @@ export default function PricingClient({
   );
 
   const handlePriceChange = (packageId: string, newPrice: string) => {
+    const pkg = allPackages.find((pkg) => pkg.id === packageId);
+    if (!pkg) return;
+
+    const minimumPrice = parseFloat(pkg.price.toString());
     const price = parseFloat(newPrice);
-    if (!isNaN(price) && price > 0) {
-      setCustomPrices(prev => ({ ...prev, [packageId]: price }));
+    if (!Number.isNaN(price) && price > 0) {
+      const safePrice = Math.max(price, minimumPrice);
+      setCustomPrices(prev => ({ ...prev, [packageId]: safePrice }));
       setHasChanges(true);
+
+      if (price < minimumPrice) {
+        toast({
+          title: "Price too low",
+          description: `Store price cannot be below GHS ${minimumPrice.toFixed(2)}.`,
+          variant: "destructive",
+        });
+      }
     }
   };
 
@@ -102,10 +129,13 @@ export default function PricingClient({
 
   const applyMarginToAllPackages = () => {
     const newPrices: Record<string, number> = {};
+    const safeMargin = Math.max(0, profitMargin);
+    if (safeMargin !== profitMargin) setProfitMargin(safeMargin);
+
     allPackages.forEach(pkg => {
       const basePrice = parseFloat(pkg.price.toString());
-      const newPrice = basePrice * (1 + profitMargin / 100);
-      newPrices[pkg.id] = Math.round(newPrice * 100) / 100; // Round to 2 decimal places
+      const newPrice = basePrice * (1 + safeMargin / 100);
+      newPrices[pkg.id] = Math.max(basePrice, Math.round(newPrice * 100) / 100);
     });
     setCustomPrices(newPrices);
     setHasChanges(true);
@@ -125,6 +155,12 @@ export default function PricingClient({
           console.warn(`Package not found for ID: ${packageId}`);
           return null;
         }
+        const minimumPrice = parseFloat(pkg.price.toString());
+        if (!Number.isFinite(sellingPrice) || sellingPrice < minimumPrice) {
+          throw new Error(
+            `${pkg.dataAmount} cannot be below GHS ${minimumPrice.toFixed(2)}.`
+          );
+        }
         return {
           reseller_id: userId,
           package_id: parseInt(packageId), // Convert to integer as expected by DB
@@ -141,7 +177,7 @@ export default function PricingClient({
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || "Failed to save prices");
+        throw new Error(errorData.error || errorData.message || "Failed to save prices");
       }
       
       toast({
@@ -162,7 +198,9 @@ export default function PricingClient({
   };
 
   const getDisplayPrice = (pkg: Package) => {
-    return customPrices[pkg.id] || parseFloat(pkg.price.toString());
+    const defaultPrice = parseFloat(pkg.price.toString());
+    const customPrice = customPrices[pkg.id];
+    return customPrice == null ? defaultPrice : Math.max(customPrice, defaultPrice);
   };
 
   return (
@@ -223,7 +261,10 @@ export default function PricingClient({
                     min="0"
                     max="100"
                     value={profitMargin}
-                    onChange={(e) => setProfitMargin(parseFloat(e.target.value) || 0)}
+                    onChange={(e) => {
+                      const value = parseFloat(e.target.value);
+                      setProfitMargin(Number.isFinite(value) ? Math.max(0, value) : 0);
+                    }}
                     className="w-24"
                   />
                   <span className="text-sm text-muted-foreground">% markup</span>
@@ -310,9 +351,10 @@ export default function PricingClient({
                                   <Input
                                     type="number"
                                     step="0.01"
-                                    min="0"
+                                    min={defaultPrice}
                                     value={displayPrice}
                                     onChange={(e) => handlePriceChange(pkg.id, e.target.value)}
+                                    onBlur={(e) => handlePriceChange(pkg.id, e.target.value)}
                                     className="h-8 text-sm"
                                   />
                                 </div>
