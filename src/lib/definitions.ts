@@ -12,21 +12,23 @@ export interface Package {
     id: number;
     name: NetworkName;
   };
+  providerNetworkId: number;
   dataAmount: string;
   validity: string;
   price: number;
   sharedBundle: number;
 }
 
-export interface CartItem {
-  cartId: string; // A unique ID for the cart item
+export type CartItem = {
+  cartId: string;
   recipientMsisdn: string;
-  networkId: number;
-  networkName: NetworkName;
+  networkId: number;        // display network ID (1=MTN, 2=Telecel, 3=AT)
+  providerNetworkId: number; // ✅ MUST be here — DataKazina's actual ID (1,2,3,4)
+  networkName: string;
   sharedBundle: number;
   price: number;
   dataAmount: string;
-}
+};
 
 // This type now matches the `transactions` table in your SQL schema.
 export type Transaction = {

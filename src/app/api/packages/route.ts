@@ -59,13 +59,14 @@ function mapDataKazinaPackages(raw: unknown[]): unknown[] {
     const priceWithAdminProfit = apiPrice * (1 + profitMargin);
 
     mapped.push({
-      id: String(packageId),
-      network: { id: displayNetId, name: networkName },
-      dataAmount,
-      validity,
-      sharedBundle: packageId,
-      price: priceWithAdminProfit,
-    });
+  id: String(packageId),
+  network: { id: displayNetId, name: networkName },
+  providerNetworkId: Math.trunc(rawNetId),  // ✅ DataKazina network_id (1,2,3,4)
+  dataAmount,
+  validity,
+  sharedBundle: volumeGb,                   // ✅ volume number e.g. 5 for 5GB
+  price: priceWithAdminProfit,
+});
   }
 
   return mapped;

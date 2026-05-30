@@ -52,13 +52,15 @@ async function verifyPaystackPayment(reference: string): Promise<boolean> {
 export async function POST(req: NextRequest) {
   // 1. Parse + validate
   let body: {
-    store_id?:          string;
-    package_id?:        number | string;
-    network_id?:        number | string;
-    phone_number?:      string;
-    email?:             string;
-    amount?:            number | string;
-    payment_reference?: string;
+    store_id?:            string;
+    package_id?:          number | string;
+    network_id?:          number | string;
+    provider_network_id?: number | string;
+    providerNetworkId?:   number | string;
+    phone_number?:        string;
+    email?:               string;
+    amount?:              number | string;
+    payment_reference?:   string;
   };
 
   try {
@@ -67,7 +69,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { store_id, package_id, network_id, phone_number, email, amount, payment_reference } = body;
+  const {
+    store_id,
+    package_id,
+    network_id,
+    provider_network_id,
+    providerNetworkId,
+    phone_number,
+    email,
+    amount,
+    payment_reference,
+  } = body;
 
   if (!store_id || !package_id || !network_id || !phone_number || !amount || !payment_reference) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -174,9 +186,26 @@ export async function POST(req: NextRequest) {
   // 8. Call DataKazina (with retry)
   const dakazinaRef = `SB-${Date.now()}`;
 
-  // Map display network ID to DataKazina network ID
-  const datakazinaNetworkId = displayNetworkIdToDatakazina(Number(network_id));
-  console.log("[guest/orders] Network mapping - displayNetworkId:", network_id, "-> datakazinaNetworkId:", datakazinaNetworkId);
+  const providerNetworkIdValue =
+    providerNetworkId != null
+      ? Number(providerNetworkId)
+      : provider_network_id != null
+        ? Number(provider_network_id)
+        : undefined;
+
+  // Map display network ID to DataKazina network ID, but prefer the package's raw provider network id when available.
+  const datakazinaNetworkId = displayNetworkIdToDatakazina(
+    Number(network_id),
+    providerNetworkIdValue
+  );
+  console.log(
+    "[guest/orders] Network mapping - displayNetworkId:",
+    network_id,
+    "providerNetworkId:",
+    providerNetworkIdValue,
+    "-> datakazinaNetworkId:",
+    datakazinaNetworkId
+  );
 
   const purchaseParams = {
     recipient_msisdn,

@@ -92,16 +92,18 @@ export async function POST(req: NextRequest) {
     recipientMsisdn,
     networkId,
     networkName,
+    providerNetworkId,
     sharedBundle,
     price,
     dataAmount,
   } = body as {
-    recipientMsisdn?: unknown;
-    networkId?:       unknown;
-    networkName?:     unknown;
-    sharedBundle?:    unknown;
-    price?:           unknown;
-    dataAmount?:      unknown;
+    recipientMsisdn?:     unknown;
+    networkId?:           unknown;
+    networkName?:         unknown;
+    providerNetworkId?:   unknown;
+    sharedBundle?:        unknown;
+    price?:               unknown;
+    dataAmount?:          unknown;
   };
 
   if (!recipientMsisdn || networkId == null || sharedBundle == null || price == null || !dataAmount) {
@@ -194,7 +196,10 @@ export async function POST(req: NextRequest) {
   const transactionId = insertedRow.id;
 
   // STEP 5 — Call DataKazina /buy-data-package
-  const datakazinaNetworkId = displayNetworkIdToDatakazina(displayNetworkId);
+  const datakazinaNetworkId = displayNetworkIdToDatakazina(
+    displayNetworkId,
+    providerNetworkId != null ? Number(providerNetworkId) : undefined
+  );
 
   const purchaseParams = {
     recipient_msisdn,

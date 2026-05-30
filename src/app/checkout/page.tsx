@@ -91,6 +91,7 @@ export default function CheckoutPage() {
                     body: JSON.stringify({
                         recipientMsisdn: item.recipientMsisdn,
                         networkId: item.networkId,
+                        providerNetworkId: item.providerNetworkId,
                         networkName: item.networkName,
                         sharedBundle: item.sharedBundle,
                         price: item.price,

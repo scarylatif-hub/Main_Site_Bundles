@@ -112,6 +112,7 @@ export default async function StorePage({
         return {
           id: pkg.id,
           network_id: displayNetworkId,
+          providerNetworkId: Math.trunc(Number(pkg.network_id)),
           name: displayName,
           data_amount: displayName,
           cost_price: mainSitePrice,

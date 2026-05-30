@@ -83,6 +83,7 @@ export default function Home() {
       recipientMsisdn: phoneNumber,
       networkId: pkg.network.id,
       networkName: pkg.network.name as NetworkName,
+      providerNetworkId: pkg.providerNetworkId,
       sharedBundle: pkg.sharedBundle,
       price: pkg.price,
       dataAmount: pkg.dataAmount,

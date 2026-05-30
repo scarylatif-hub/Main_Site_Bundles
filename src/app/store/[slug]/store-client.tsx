@@ -10,6 +10,7 @@ import { useMaintenanceMode } from "@/hooks/use-maintenance-mode";
 type Package = {
   id: number;
   network_id: number;
+  providerNetworkId: number;
   name: string;
   data_amount: string;
   cost_price: number;
@@ -94,6 +95,7 @@ type PendingStorePayment = {
   store_id: string;
   package_id: number;
   network_id: number;
+  providerNetworkId: number;
   phone_number: string;
   email: string;
   amount: number;
@@ -261,11 +263,12 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
           email,
           callbackUrl: `${window.location.origin}/store/${storeOwner.reseller_slug}`,
           metadata: {
-            store_id:     storeOwner.id,
-            package_id:   selectedPkg.id,
-            network_id:   selectedPkg.network_id,
-            phone_number: phone,
-            customer_name: name,
+            store_id:          storeOwner.id,
+            package_id:        selectedPkg.id,
+            network_id:        selectedPkg.network_id,
+            providerNetworkId: selectedPkg.providerNetworkId,
+            phone_number:      phone,
+            customer_name:     name,
           },
         }),
       });
@@ -282,6 +285,7 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
         store_id: storeOwner.id,
         package_id: selectedPkg.id,
         network_id: selectedPkg.network_id,
+        providerNetworkId: selectedPkg.providerNetworkId,
         phone_number: phone,
         email,
         amount: selectedPkg.selling_price,

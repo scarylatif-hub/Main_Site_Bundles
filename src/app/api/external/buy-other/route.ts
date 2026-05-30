@@ -29,6 +29,8 @@ export async function POST(request: NextRequest) {
       network_id?: number;
       sharedBundle?: number;
       shared_bundle?: number;
+      providerNetworkId?: number;
+      provider_network_id?: number;
     };
     try {
       body = await request.json();
@@ -50,8 +52,13 @@ export async function POST(request: NextRequest) {
 
     const recipient_msisdn = normalizePhoneNumber(String(recipient_raw));
 
+    const providerNetworkId = body.providerNetworkId ?? body.provider_network_id;
+
     // Convert display network ID to DataKazina network ID
-    const datakazinaNetworkId = displayNetworkIdToDatakazina(Number(network_id));
+    const datakazinaNetworkId = displayNetworkIdToDatakazina(
+      Number(network_id),
+      providerNetworkId != null ? Number(providerNetworkId) : undefined
+    );
 
     // Generate unique reference
     const incoming_api_ref = `web-${Date.now()}-${user.id.slice(0, 8)}`;

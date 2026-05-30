@@ -31,6 +31,7 @@ export function PackageCard({ packageInfo, phoneNumber }: PackageCardProps) {
             recipientMsisdn: phoneNumber,
             networkId: packageInfo.network.id,
             networkName: packageInfo.network.name,
+            providerNetworkId: packageInfo.providerNetworkId,
             sharedBundle: packageInfo.sharedBundle,
             price: packageInfo.price,
             dataAmount: packageInfo.dataAmount,
