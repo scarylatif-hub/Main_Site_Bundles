@@ -39,7 +39,7 @@ interface ApiPackage {
   };
   dataAmount: string;   // e.g. "1GB", "20GB"
   validity: string;     // e.g. "30 days"
-  sharedBundle: number; // DataKazina package id — used as package_id in reseller_prices
+  sharedBundle: number; // package volume in GB, not the DataKazina package ID
   price: number;        // provider cost price — NOT the floor, do not use as floor
 }
 
@@ -114,8 +114,9 @@ export default function PricingClient({ userId, currentMarkup }: PricingClientPr
           const marginMap: Record<string, number> = {};
 
           for (const stored of Array.isArray(priceData) ? priceData : []) {
-            // stored.package_id = sharedBundle value (DataKazina package id)
-            const pkg = validPkgs.find((p) => p.sharedBundle === stored.package_id);
+            const storedId = String(stored.package_id);
+            const pkg = validPkgs.find((p) => p.id === storedId) ||
+              validPkgs.find((p) => p.sharedBundle === Number(stored.package_id));
             if (!pkg) continue;
 
             const floor = getFloorPrice(pkg);
@@ -207,7 +208,7 @@ export default function PricingClient({ userId, currentMarkup }: PricingClientPr
           if (!pkg) return [];
           if (getFloorPrice(pkg) == null) return [];
           return [{
-            package_id: pkg.sharedBundle, // DataKazina package id → reseller_prices.package_id
+            package_id: Number(pkg.id), // DataKazina package id → reseller_prices.package_id
             network_id: pkg.network.id,
             margin_percentage: margin,
           }];

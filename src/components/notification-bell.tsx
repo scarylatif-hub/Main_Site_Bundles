@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,8 +21,50 @@ type Broadcast = {
   created_at: string;
 };
 
+const BROADCAST_STORAGE_KEY = "broadcast-notification-last-shown-id";
+
+function formatNotificationMessage(message: string) {
+  const urlRegex = /((?:https?:\/\/|www\.)[^\s]+)/gi;
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+
+  const normalized = message.replace(/\r\n/g, "\n");
+  let match: RegExpExecArray | null;
+
+  while ((match = urlRegex.exec(normalized))) {
+    const url = match[0];
+    const href = url.startsWith("www.") ? `https://${url}` : url;
+
+    if (match.index > lastIndex) {
+      parts.push(normalized.slice(lastIndex, match.index));
+    }
+
+    parts.push(
+      <a
+        key={`${url}-${match.index}`}
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        className="text-primary underline"
+      >
+        {url}
+      </a>
+    );
+
+    lastIndex = match.index + url.length;
+  }
+
+  if (lastIndex < normalized.length) {
+    parts.push(normalized.slice(lastIndex));
+  }
+
+  return parts.length > 0 ? parts : message;
+}
+
 export function NotificationBell() {
   const [items, setItems] = useState<Broadcast[]>([]);
+  const [popupShown, setPopupShown] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     let cancelled = false;
@@ -38,6 +81,38 @@ export function NotificationBell() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (popupShown || items.length === 0) return;
+
+    const latest = items[0];
+    if (!latest?.id) return;
+
+    const lastShownId = typeof window !== "undefined"
+      ? window.localStorage.getItem(BROADCAST_STORAGE_KEY)
+      : null;
+
+    if (latest.id === lastShownId) {
+      setPopupShown(true);
+      return;
+    }
+
+    toast({
+      title: latest.title,
+      description: (
+        <div className="whitespace-pre-wrap break-words">
+          {formatNotificationMessage(latest.message)}
+        </div>
+      ),
+      variant: "default",
+    });
+
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(BROADCAST_STORAGE_KEY, latest.id);
+    }
+
+    setPopupShown(true);
+  }, [items, popupShown, toast]);
 
   return (
     <DropdownMenu>

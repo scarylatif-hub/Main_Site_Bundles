@@ -5,6 +5,7 @@
 // recipients  is a JSON array of strings, NOT comma-separated.
 
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -217,5 +218,61 @@ export async function POST(req: NextRequest) {
       { error: err instanceof Error ? err.message : "Internal server error" },
       { status: 500 },
     );
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const url = new URL(req.url);
+    const id = url.searchParams.get("id");
+    if (!id) {
+      return NextResponse.json({ error: "id query param required" }, { status: 400 });
+    }
+
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("broadcast_notifications")
+      .delete()
+      .eq("id", id)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.error("[broadcast-notifications][delete]", error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ deleted: data }, { status: 200 });
+  } catch (err) {
+    console.error("[broadcast-notifications][delete]", err);
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Internal" }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const body: Partial<{ id: string; title: string; message: string }> = await req.json().catch(() => ({}));
+    const { id, title, message } = body;
+    if (!id || !title || !message) {
+      return NextResponse.json({ error: "id, title and message required" }, { status: 400 });
+    }
+
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("broadcast_notifications")
+      .update({ title: title.trim(), message: message.trim() })
+      .eq("id", id)
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      console.error("[broadcast-notifications][patch]", error);
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ item: data }, { status: 200 });
+  } catch (err) {
+    console.error("[broadcast-notifications][patch]", err);
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Internal" }, { status: 500 });
   }
 }

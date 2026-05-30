@@ -22,6 +22,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { Edit2, Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -100,6 +110,10 @@ export function BroadcastPanel({ initialItems }: { initialItems: BroadcastRow[] 
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [lastSms, setLastSms] = useState<SmsResult | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editMessage, setEditMessage] = useState("");
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   // recipient mode
   const [mode, setMode] = useState<RecipientMode>("all");
@@ -199,6 +213,49 @@ export function BroadcastPanel({ initialItems }: { initialItems: BroadcastRow[] 
       });
     } finally {
       setSending(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      const res = await fetch(`/api/admin/broadcast-notifications?id=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error ?? "Delete failed");
+      setItems((prev) => prev.filter((p) => p.id !== id));
+      toast({ title: "Deleted", description: "Notification removed" });
+    } catch (e) {
+      toast({ title: "Could not delete", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" });
+    }
+  }
+
+  function startEdit(item: BroadcastRow) {
+    setEditingId(item.id);
+    setEditTitle(item.title);
+    setEditMessage(item.message);
+    setLastSms(null);
+  }
+
+  async function saveEdit() {
+    if (!editingId) return;
+    try {
+      const res = await fetch(`/api/admin/broadcast-notifications`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ id: editingId, title: editTitle, message: editMessage }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error ?? "Update failed");
+      if (j.item) {
+        setItems((prev) => prev.map((it) => (it.id === editingId ? (j.item as BroadcastRow) : it)));
+      }
+      setEditingId(null);
+      toast({ title: "Updated", description: "Notification updated" });
+    } catch (e) {
+      toast({ title: "Could not update", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" });
     }
   }
 
@@ -401,28 +458,74 @@ export function BroadcastPanel({ initialItems }: { initialItems: BroadcastRow[] 
                   key={n.id}
                   className="border-b pb-4 last:border-0 space-y-1 text-sm"
                 >
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-semibold">{n.title}</p>
-                    <Badge variant="outline" className="text-xs">
-                      {n.recipients_mode === "all"
-                        ? "All customers"
-                        : n.recipients_mode === "single"
-                        ? "1 customer"
-                        : `${n.recipient_count} recipients`}
-                    </Badge>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-semibold">{n.title}</p>
+                      <Badge variant="outline" className="text-xs">
+                        {n.recipients_mode === "all"
+                          ? "All customers"
+                          : n.recipients_mode === "single"
+                          ? "1 customer"
+                          : `${n.recipient_count} recipients`}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {editingId === n.id ? (
+                        <>
+                          <Button size="sm" onClick={() => saveEdit()}>
+                            Save
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
+                            Cancel
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button size="sm" variant="ghost" onClick={() => startEdit(n)}>
+                            <Edit2 className="h-4 w-4" />
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setPendingDeleteId(n.id)}>
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-muted-foreground whitespace-pre-wrap">
-                    {n.message}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {format(new Date(n.created_at), "MMM d, yyyy h:mm a")}
-                  </p>
+
+                  {editingId === n.id ? (
+                    <div className="space-y-2 pt-2">
+                      <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
+                      <Textarea value={editMessage} onChange={(e) => setEditMessage(e.target.value)} rows={3} />
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-muted-foreground whitespace-pre-wrap">{n.message}</p>
+                      <p className="text-xs text-muted-foreground">{format(new Date(n.created_at), "MMM d, yyyy h:mm a")}</p>
+                    </>
+                  )}
                 </li>
               ))}
             </ul>
           )}
         </CardContent>
       </Card>
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={!!pendingDeleteId} onOpenChange={(v) => { if (!v) setPendingDeleteId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete notification</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the selected notification. Are you sure you want to continue?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex gap-2 justify-end">
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { if (pendingDeleteId) { handleDelete(pendingDeleteId); setPendingDeleteId(null); } }}>
+              Delete
+            </AlertDialogAction>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
