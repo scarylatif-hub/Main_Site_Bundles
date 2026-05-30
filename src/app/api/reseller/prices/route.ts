@@ -89,22 +89,16 @@ export async function POST(req: NextRequest) {
 
     const minPriceMap = await buildMinimumPriceMap();
 
-    // Validate each price. The client sends `selling_price`; keep `price`
-    // as a backward-compatible fallback for older callers.
+    // Validate each price. The client sends `margin_percentage` now,
+    // while older callers may still send `selling_price`.
     const sanitizedPrices = [];
     for (const price of prices) {
       const packageId = Number(price.package_id);
-      const storePrice = Number(price.selling_price ?? price.price);
       const minPrice = minPriceMap.get(packageId);
 
-      if (
-        !Number.isInteger(packageId) ||
-        packageId <= 0 ||
-        !Number.isFinite(storePrice) ||
-        storePrice <= 0
-      ) {
+      if (!Number.isInteger(packageId) || packageId <= 0) {
         return NextResponse.json(
-          { error: "Invalid package or selling price" },
+          { error: "Invalid package ID" },
           { status: 400 }
         );
       }
@@ -116,13 +110,38 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      if (storePrice < minPrice) {
+      const margin = Number(price.margin_percentage ?? price.margin);
+      const explicitPrice = Number(price.selling_price ?? price.price);
+      let sellingPrice: number;
+
+      if (Number.isFinite(margin)) {
+        if (margin < 0 || margin > 50) {
+          return NextResponse.json(
+            {
+              error: `Margin for package ${packageId} must be between 0% and 50%`,
+              package_id: packageId,
+              provided_margin: margin,
+            },
+            { status: 400 }
+          );
+        }
+        sellingPrice = Math.round(minPrice * (1 + margin / 100) * 100) / 100;
+      } else if (Number.isFinite(explicitPrice) && explicitPrice > 0) {
+        sellingPrice = Math.round(explicitPrice * 100) / 100;
+      } else {
+        return NextResponse.json(
+          { error: "Invalid package or selling price" },
+          { status: 400 }
+        );
+      }
+
+      if (sellingPrice < minPrice) {
         return NextResponse.json(
           {
             error: `Price for package ${packageId} cannot be below GHS ${minPrice.toFixed(2)} (main site price)`,
             package_id: packageId,
             minimum_price: minPrice,
-            provided_price: storePrice,
+            provided_price: sellingPrice,
           },
           { status: 400 }
         );
@@ -132,7 +151,7 @@ export async function POST(req: NextRequest) {
         reseller_id: user.id,
         package_id: packageId,
         network_id: Number(price.network_id) || null,
-        selling_price: Math.round(storePrice * 100) / 100,
+        selling_price: sellingPrice,
       });
     }
 

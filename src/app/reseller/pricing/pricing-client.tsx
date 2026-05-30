@@ -1,3 +1,16 @@
+/**
+ * src/app/reseller/pricing/pricing-client.tsx
+ *
+ * Pricing logic:
+ *   floor_price   = MINIMUM_PRICES[network][gb]  (main site price — the floor)
+ *   selling_price = floor_price × (1 + margin / 100)
+ *   margin        ∈ [0, 50]
+ *
+ * At 0% margin  → store charges same as main site
+ * At 50% margin → store charges floor × 1.5
+ * Profit per sale = selling_price − floor_price
+ */
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -13,370 +26,424 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
-import { Package } from "@/lib/definitions";
+import { getMinimumPrice } from "@/lib/minimum-prices";
 import { Store, Globe, Save, RotateCcw } from "lucide-react";
+
+// ── Types matching actual /api/packages response ──────────────────────────────
+
+interface ApiPackage {
+  id: string;           // e.g. "1" — string!
+  network: {
+    id: number;         // display network id: 1=MTN, 2=Telecel, 3=AirtelTigo
+    name: string;       // "MTN" | "Telecel" | "AirtelTigo"
+  };
+  dataAmount: string;   // e.g. "1GB", "20GB"
+  validity: string;     // e.g. "30 days"
+  sharedBundle: number; // DataKazina package id — used as package_id in reseller_prices
+  price: number;        // provider cost price — NOT the floor, do not use as floor
+}
+
+interface StoredPrice {
+  package_id: number;
+  selling_price: number;
+}
 
 interface PricingClientProps {
   userId: string;
   currentMarkup: number;
 }
 
-interface ResellerPrice {
-  package_id: number;
-  selling_price: number;
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const NETWORK_ORDER = ["MTN", "Telecel", "AirtelTigo"];
+
+/** Extract numeric GB value from label like "1GB", "20GB", "1.5GB" */
+function parseGb(dataAmount: string): number | null {
+  const m = String(dataAmount).match(/(\d+(?:\.\d+)?)/);
+  return m ? Number(m[1]) : null;
 }
 
-export default function PricingClient({
-  userId,
-  currentMarkup,
-}: PricingClientProps) {
-  const [allPackages, setAllPackages] = useState<Package[]>([]);
+/**
+ * Normalise network name to the key used in MINIMUM_PRICES.
+ * /api/packages returns "MTN", "Telecel", "AirtelTigo"
+ * MINIMUM_PRICES keys are "MTN", "TELECEL", "AIRTELTIGO"
+ * getMinimumPrice() calls toUpperCase() internally so pass name as-is.
+ */
+function getFloorPrice(pkg: ApiPackage): number | null {
+  const gb = parseGb(pkg.dataAmount);
+  if (gb == null) return null;
+  return getMinimumPrice(pkg.network.name, gb);
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+export default function PricingClient({ userId, currentMarkup }: PricingClientProps) {
+  const [packages, setPackages] = useState<ApiPackage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [customPrices, setCustomPrices] = useState<Record<string, number>>({});
+
+  // margin keyed by pkg.id (string)
+  const [margins, setMargins] = useState<Record<string, number>>({});
   const [hasChanges, setHasChanges] = useState(false);
-  const [profitMargin, setProfitMargin] = useState<number>(
-    Math.max(0, currentMarkup * 100 || 20)
+  const [globalMargin, setGlobalMargin] = useState<number>(
+    Math.min(50, Math.max(0, (currentMarkup ?? 0) * 100)),
   );
 
+  // ── Load ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const fetchPackages = async () => {
+    const load = async () => {
+      setIsLoading(true);
       try {
-        setIsLoading(true);
-        const [packagesResponse, pricesResponse] = await Promise.all([
+        const [pkgRes, priceRes] = await Promise.all([
           fetch("/api/packages"),
-          fetch("/api/reseller/prices")
+          fetch("/api/reseller/prices"),
         ]);
-        
-        if (!packagesResponse.ok) throw new Error("Failed to fetch packages");
-        const packagesData = await packagesResponse.json();
-        setAllPackages(Array.isArray(packagesData) ? packagesData : []);
-        
-        if (pricesResponse.ok) {
-          const pricesData = await pricesResponse.json();
-          const packageMap = new Map(
-            (Array.isArray(packagesData) ? packagesData : []).map((pkg: Package) => [
-              String(pkg.id),
-              pkg,
-            ])
-          );
-          const priceMap: Record<string, number> = {};
-          (pricesData || []).forEach((price: ResellerPrice) => {
-            const packageId = String(price.package_id);
-            const pkg = packageMap.get(packageId);
-            const minimumPrice = pkg ? Number(pkg.price) : 0;
-            priceMap[packageId] = Math.max(
-              Number(price.selling_price),
-              minimumPrice
+
+        if (!pkgRes.ok) throw new Error("Failed to load packages");
+        const pkgData: ApiPackage[] = await pkgRes.json();
+        const validPkgs = Array.isArray(pkgData) ? pkgData : [];
+        setPackages(validPkgs);
+
+        if (priceRes.ok) {
+          const priceData: StoredPrice[] = await priceRes.json();
+          const marginMap: Record<string, number> = {};
+
+          for (const stored of Array.isArray(priceData) ? priceData : []) {
+            // stored.package_id = sharedBundle value (DataKazina package id)
+            const pkg = validPkgs.find((p) => p.sharedBundle === stored.package_id);
+            if (!pkg) continue;
+
+            const floor = getFloorPrice(pkg);
+            if (floor == null || floor <= 0) continue;
+
+            const storedPrice = Number(stored.selling_price);
+            // Reconstruct margin from stored price and floor
+            const margin = round2(
+              Math.min(50, Math.max(0, ((storedPrice / floor) - 1) * 100)),
             );
-          });
-          setCustomPrices(priceMap);
+            marginMap[pkg.id] = margin;
+          }
+
+          setMargins(marginMap);
         }
-      } catch (error) {
-        console.error(error);
-        setAllPackages([]);
+      } catch (err) {
+        console.error("[PricingClient] Load error:", err);
+        toast({
+          title: "Failed to load packages",
+          description: "Please refresh the page.",
+          variant: "destructive",
+        });
       } finally {
         setIsLoading(false);
       }
     };
-    fetchPackages();
+
+    load();
   }, []);
 
-  // Group packages by network
-  const packagesByNetwork = allPackages.reduce((acc, pkg) => {
-    const network = pkg.network.name;
-    if (!acc[network]) acc[network] = [];
-    acc[network].push(pkg);
+  // ── Grouping + sorting ────────────────────────────────────────────────────
+  const byNetwork = packages.reduce<Record<string, ApiPackage[]>>((acc, pkg) => {
+    const key = pkg.network?.name ?? "Unknown";
+    (acc[key] ??= []).push(pkg);
     return acc;
-  }, {} as Record<string, Package[]>);
+  }, {});
 
-  // Sort networks: MTN, AirtelTigo, Telecel
-  const networkOrder = ["MTN", "AirtelTigo", "Telecel"];
-  const sortedNetworks = Object.keys(packagesByNetwork).sort(
-    (a, b) => networkOrder.indexOf(a) - networkOrder.indexOf(b)
+  const sortedNetworks = Object.keys(byNetwork).sort(
+    (a, b) => {
+      const ai = NETWORK_ORDER.indexOf(a);
+      const bi = NETWORK_ORDER.indexOf(b);
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    },
   );
 
-  const handlePriceChange = (packageId: string, newPrice: string) => {
-    const pkg = allPackages.find((pkg) => pkg.id === packageId);
-    if (!pkg) return;
+  // ── Margin handlers ───────────────────────────────────────────────────────
+  const handleMarginChange = (pkgId: string, raw: string) => {
+    const val = parseFloat(raw);
+    if (raw === "" || raw === "-") return; // still typing
 
-    const minimumPrice = parseFloat(pkg.price.toString());
-    const price = parseFloat(newPrice);
-    if (!Number.isNaN(price) && price > 0) {
-      const safePrice = Math.max(price, minimumPrice);
-      setCustomPrices(prev => ({ ...prev, [packageId]: safePrice }));
-      setHasChanges(true);
+    if (Number.isNaN(val) || val < 0 || val > 50) {
+      toast({
+        title: "Invalid margin",
+        description: "Margin must be between 0% and 50%.",
+        variant: "destructive",
+      });
+      return;
+    }
 
-      if (price < minimumPrice) {
-        toast({
-          title: "Price too low",
-          description: `Store price cannot be below GHS ${minimumPrice.toFixed(2)}.`,
-          variant: "destructive",
-        });
+    setMargins((prev) => ({ ...prev, [pkgId]: round2(val) }));
+    setHasChanges(true);
+  };
+
+  const applyGlobalMargin = () => {
+    const safe = round2(Math.min(50, Math.max(0, globalMargin)));
+    setGlobalMargin(safe);
+    const next: Record<string, number> = {};
+    for (const pkg of packages) {
+      if (getFloorPrice(pkg) != null) {
+        next[pkg.id] = safe;
       }
     }
-  };
-
-  const resetToDefault = (packageId: string) => {
-    setCustomPrices(prev => {
-      const newPrices = { ...prev };
-      delete newPrices[packageId];
-      return newPrices;
-    });
+    setMargins(next);
     setHasChanges(true);
   };
 
-  const applyMarginToAllPackages = () => {
-    const newPrices: Record<string, number> = {};
-    const safeMargin = Math.max(0, profitMargin);
-    if (safeMargin !== profitMargin) setProfitMargin(safeMargin);
-
-    allPackages.forEach(pkg => {
-      const basePrice = parseFloat(pkg.price.toString());
-      const newPrice = basePrice * (1 + safeMargin / 100);
-      newPrices[pkg.id] = Math.max(basePrice, Math.round(newPrice * 100) / 100);
-    });
-    setCustomPrices(newPrices);
+  const resetAll = () => {
+    setMargins({});
     setHasChanges(true);
   };
 
-  const resetAllToDefault = () => {
-    setCustomPrices({});
-    setHasChanges(true);
-  };
-
+  // ── Save ──────────────────────────────────────────────────────────────────
   const savePrices = async () => {
     setIsSaving(true);
     try {
-      const pricesToSave = Object.entries(customPrices).map(([packageId, sellingPrice]) => {
-        const pkg = allPackages.find(pkg => pkg.id === packageId);
-        if (!pkg) {
-          console.warn(`Package not found for ID: ${packageId}`);
-          return null;
-        }
-        const minimumPrice = parseFloat(pkg.price.toString());
-        if (!Number.isFinite(sellingPrice) || sellingPrice < minimumPrice) {
-          throw new Error(
-            `${pkg.dataAmount} cannot be below GHS ${minimumPrice.toFixed(2)}.`
-          );
-        }
-        return {
-          reseller_id: userId,
-          package_id: parseInt(packageId), // Convert to integer as expected by DB
-          network_id: pkg.network?.id || 1, // Include network_id from package data with fallback
-          selling_price: sellingPrice
-        };
-      }).filter(Boolean); // Filter out null entries
+      const payload = Object.entries(margins)
+        .flatMap(([pkgId, margin]) => {
+          const pkg = packages.find((p) => p.id === pkgId);
+          if (!pkg) return [];
+          if (getFloorPrice(pkg) == null) return [];
+          return [{
+            package_id: pkg.sharedBundle, // DataKazina package id → reseller_prices.package_id
+            network_id: pkg.network.id,
+            margin_percentage: margin,
+          }];
+        });
 
-      const response = await fetch("/api/reseller/prices", {
+      if (payload.length === 0) {
+        toast({ title: "Nothing to save", description: "Set at least one margin first." });
+        return;
+      }
+
+      const res = await fetch("/api/reseller/prices", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(pricesToSave)
+        body: JSON.stringify(payload),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || errorData.message || "Failed to save prices");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(err.error ?? err.message ?? "Failed to save");
       }
-      
-      toast({
-        title: "Prices saved",
-        description: "Your custom prices have been updated successfully."
-      });
+
+      toast({ title: "Prices saved", description: "Your store prices have been updated." });
       setHasChanges(false);
-    } catch (error) {
-      console.error("Save prices error:", error);
+    } catch (err) {
+      console.error("[PricingClient] Save error:", err);
       toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to save prices. Please try again.",
-        variant: "destructive"
+        title: "Save failed",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
       });
     } finally {
       setIsSaving(false);
     }
   };
 
-  const getDisplayPrice = (pkg: Package) => {
-    const defaultPrice = parseFloat(pkg.price.toString());
-    const customPrice = customPrices[pkg.id];
-    return customPrice == null ? defaultPrice : Math.max(customPrice, defaultPrice);
+  // ── Per-package computed values ───────────────────────────────────────────
+  const getDisplayPrice = (pkg: ApiPackage): number | null => {
+    const floor = getFloorPrice(pkg);
+    if (floor == null) return null;
+    const margin = margins[pkg.id] ?? 0;
+    return round2(floor * (1 + margin / 100));
   };
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="container mx-auto max-w-4xl px-4 py-8">
-      <div className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-2xl font-bold">Your Store Prices</h1>
-            <p className="text-muted-foreground">
-              Set custom prices for your store or use default prices.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={resetAllToDefault}
-              disabled={!isEditing || Object.keys(customPrices).length === 0}
-            >
-              <RotateCcw className="h-4 w-4 mr-2" />
-              Reset All
-            </Button>
-            <Button
-              onClick={() => setIsEditing(!isEditing)}
-              variant={isEditing ? "default" : "outline"}
-            >
-              {isEditing ? "Cancel Editing" : "Edit Prices"}
-            </Button>
-          </div>
+
+      {/* Header */}
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Your Store Prices</h1>
+          <p className="text-muted-foreground">
+            Set profit margin above main website price.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={resetAll}
+            disabled={!isEditing || Object.keys(margins).length === 0}
+          >
+            <RotateCcw className="mr-2 h-4 w-4" />
+            Reset All
+          </Button>
+          <Button
+            variant={isEditing ? "default" : "outline"}
+            onClick={() => setIsEditing((v) => !v)}
+          >
+            {isEditing ? "Cancel" : "Edit Prices"}
+          </Button>
         </div>
       </div>
 
-      {/* Info Card */}
+      {/* Store pricing info card */}
       <Card className="mb-6 border-emerald-200 bg-emerald-50/30">
         <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-2">
+          <CardTitle className="flex items-center gap-2 text-lg">
             <Store className="h-5 w-5" />
             Store Pricing
           </CardTitle>
           <CardDescription>
-            {isEditing 
-              ? "Set custom prices for your data bundles. Use profit margin for bulk changes or edit individually."
-              : "Your store uses custom pricing. Click 'Edit Prices' to modify your prices."
-            }
+            Prices start at main site price (0% margin). Max 50% markup.
+            Your profit = selling price − main site price.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {isEditing && (
-            <div className="flex items-center gap-4 p-4 bg-white rounded-lg border">
+            <div className="flex items-center gap-4 rounded-lg border bg-white p-4">
               <div className="flex-1">
-                <Label htmlFor="margin" className="text-sm font-medium mb-2 block">
-                  Profit Margin (%)
+                <Label htmlFor="global-margin" className="mb-2 block text-sm font-medium">
+                  Apply margin to all packages (%)
                 </Label>
                 <div className="flex items-center gap-2">
                   <Input
-                    id="margin"
+                    id="global-margin"
                     type="number"
                     step="0.1"
                     min="0"
-                    max="100"
-                    value={profitMargin}
+                    max="50"
+                    value={globalMargin}
                     onChange={(e) => {
-                      const value = parseFloat(e.target.value);
-                      setProfitMargin(Number.isFinite(value) ? Math.max(0, value) : 0);
+                      const v = parseFloat(e.target.value);
+                      setGlobalMargin(Number.isFinite(v) ? Math.min(50, Math.max(0, v)) : 0);
                     }}
                     className="w-24"
                   />
                   <span className="text-sm text-muted-foreground">% markup</span>
-                  <div className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded">
-                    +{profitMargin}% profit
-                  </div>
+                  <span className="rounded bg-green-50 px-2 py-1 text-xs text-green-600">
+                    +{globalMargin}% profit
+                  </span>
                 </div>
               </div>
-              <Button
-                onClick={applyMarginToAllPackages}
-                className="mt-6"
-              >
-                Apply to All Packages
+              <Button className="mt-6" onClick={applyGlobalMargin}>
+                Apply to All
               </Button>
             </div>
           )}
+
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Globe className="h-4 w-4" />
-              <span>{Object.keys(customPrices).length} custom price{Object.keys(customPrices).length !== 1 ? 's' : ''} set</span>
+              <span>
+                {Object.keys(margins).length} custom margin
+                {Object.keys(margins).length !== 1 ? "s" : ""} set
+              </span>
             </div>
             {hasChanges && (
-              <Button
-                onClick={savePrices}
-                disabled={isSaving}
-                size="sm"
-              >
-                <Save className="h-4 w-4 mr-2" />
-                {isSaving ? "Saving..." : "Save Changes"}
+              <Button onClick={savePrices} disabled={isSaving} size="sm">
+                <Save className="mr-2 h-4 w-4" />
+                {isSaving ? "Saving…" : "Save Changes"}
               </Button>
             )}
           </div>
         </CardContent>
       </Card>
 
-      {/* Price List */}
+      {/* Package grid */}
       <Card>
         <CardHeader>
           <CardTitle>Data Bundle Prices</CardTitle>
           <CardDescription>
-            These are the prices your customers will see in your store.
+            Prices your customers will see in your store.
           </CardDescription>
         </CardHeader>
         <CardContent>
           {isLoading ? (
             <div className="space-y-4">
-              <div className="h-12 bg-muted rounded animate-pulse" />
-              <div className="h-12 bg-muted rounded animate-pulse" />
-              <div className="h-12 bg-muted rounded animate-pulse" />
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-12 animate-pulse rounded bg-muted" />
+              ))}
             </div>
+          ) : packages.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No packages available.</p>
           ) : (
             <div className="space-y-6">
               {sortedNetworks.map((network) => (
                 <div key={network}>
-                  <div className="flex items-center gap-2 mb-3">
-                    <Badge variant="outline" className={
-                      network === "MTN" ? "bg-yellow-50 text-yellow-800 border-yellow-200" :
-                      network === "AirtelTigo" ? "bg-blue-50 text-blue-800 border-blue-200" :
-                      "bg-red-50 text-red-800 border-red-200"
-                    }>
+                  {/* Network badge */}
+                  <div className="mb-3">
+                    <Badge
+                      variant="outline"
+                      className={
+                        network === "MTN"
+                          ? "border-yellow-200 bg-yellow-50 text-yellow-800"
+                          : network === "AirtelTigo"
+                            ? "border-blue-200 bg-blue-50 text-blue-800"
+                            : "border-red-200 bg-red-50 text-red-800"
+                      }
+                    >
                       {network}
                     </Badge>
                   </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                    {packagesByNetwork[network]
-                      .sort((a, b) => parseFloat(a.dataAmount) - parseFloat(b.dataAmount))
+
+                  {/* Package cards */}
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                    {byNetwork[network]
+                      .slice()
+                      .sort((a, b) => (parseGb(a.dataAmount) ?? 0) - (parseGb(b.dataAmount) ?? 0))
                       .map((pkg) => {
+                        const floor = getFloorPrice(pkg);
                         const displayPrice = getDisplayPrice(pkg);
-                        const isCustom = customPrices[pkg.id] !== undefined;
-                        const defaultPrice = parseFloat(pkg.price.toString());
-                        
+                        const currentMargin = margins[pkg.id];
+                        const hasCustom = currentMargin !== undefined;
+
+                        // Skip packages with no floor price entry
+                        if (floor == null) return null;
+
                         return (
                           <div
                             key={pkg.id}
-                            className={`border rounded-lg p-3 flex flex-col justify-between ${
-                              isCustom ? 'bg-blue-50 border-blue-200' : 'bg-muted/30'
+                            className={`flex flex-col justify-between rounded-lg border p-3 ${
+                              hasCustom
+                                ? "border-blue-200 bg-blue-50"
+                                : "bg-muted/30"
                             }`}
                           >
+                            {/* Bundle size label */}
                             <div className="text-sm font-medium">{pkg.dataAmount}</div>
+
                             {isEditing ? (
-                              <div className="space-y-2">
+                              /* Edit mode */
+                              <div className="mt-2 space-y-1">
                                 <div className="flex items-center gap-1">
-                                  <span className="text-xs text-muted-foreground">GHS</span>
                                   <Input
                                     type="number"
-                                    step="0.01"
-                                    min={defaultPrice}
-                                    value={displayPrice}
-                                    onChange={(e) => handlePriceChange(pkg.id, e.target.value)}
-                                    onBlur={(e) => handlePriceChange(pkg.id, e.target.value)}
-                                    className="h-8 text-sm"
+                                    step="0.1"
+                                    min="0"
+                                    max="50"
+                                    value={currentMargin ?? ""}
+                                    placeholder="0"
+                                    onChange={(e) => handleMarginChange(pkg.id, e.target.value)}
+                                    className="h-8 w-16 text-sm"
                                   />
+                                  <span className="text-xs text-muted-foreground">%</span>
                                 </div>
-                                {isCustom && (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => resetToDefault(pkg.id)}
-                                    className="h-6 text-xs px-2"
-                                  >
-                                    Reset to GHS {defaultPrice.toFixed(2)}
-                                  </Button>
+                                <div className="text-xs text-muted-foreground">
+                                  Floor: GHS {floor.toFixed(2)}
+                                </div>
+                                {displayPrice != null && (
+                                  <div className="text-xs font-medium text-blue-700">
+                                    → GHS {displayPrice.toFixed(2)}
+                                  </div>
                                 )}
                               </div>
                             ) : (
-                              <div>
+                              /* View mode */
+                              <div className="mt-2">
                                 <div className="text-lg font-bold text-primary">
-                                  GHS {displayPrice.toFixed(2)}
+                                  GHS {(displayPrice ?? floor).toFixed(2)}
                                 </div>
-                                {isCustom && (
+                                <div className="text-xs text-muted-foreground">
+                                  Floor: GHS {floor.toFixed(2)}
+                                </div>
+                                {hasCustom && (
                                   <div className="text-xs text-blue-600">
-                                    Custom (was GHS {defaultPrice.toFixed(2)})
+                                    +{currentMargin}% margin
                                   </div>
                                 )}
                               </div>
