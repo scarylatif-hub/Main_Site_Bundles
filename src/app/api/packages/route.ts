@@ -12,6 +12,7 @@ import {
   isConsumerDataBundle,
   parseDataPackageVolumeGb,
 } from '@/lib/package-display';
+import { getRetailPriceGhs } from '@/lib/retail-prices';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,19 +55,21 @@ function mapDataKazinaPackages(raw: unknown[]): unknown[] {
 
     const dataAmount = formatDataPackageLabel(pkg, volumeGb);
     const validity = pkg.validity != null ? String(pkg.validity) : '30 days';
-    const apiPrice = Number(pkg.price || pkg.console_price || 0);
-    const profitMargin = volumeGb >= 10 ? 0.1 : 0.114;
-    const priceWithAdminProfit = apiPrice * (1 + profitMargin);
+    const manualPrice = getRetailPriceGhs(displayNetId, volumeGb);
+
+    if (manualPrice == null) {
+      console.warn('[packages] Missing manual price for package', { displayNetId, volumeGb, packageId });
+    }
 
     mapped.push({
-  id: String(packageId),
-  network: { id: displayNetId, name: networkName },
-  providerNetworkId: Math.trunc(rawNetId),  // ✅ DataKazina network_id (1,2,3,4)
-  dataAmount,
-  validity,
-  sharedBundle: volumeGb,                   // ✅ volume number e.g. 5 for 5GB
-  price: priceWithAdminProfit,
-});
+      id: String(packageId),
+      network: { id: displayNetId, name: networkName },
+      providerNetworkId: Math.trunc(rawNetId),  // ✅ DataKazina network_id (1,2,3,4)
+      dataAmount,
+      validity,
+      sharedBundle: volumeGb,                   // ✅ volume number e.g. 5 for 5GB
+      price: manualPrice ?? Number(pkg.price || pkg.console_price || 0),
+    });
   }
 
   return mapped;

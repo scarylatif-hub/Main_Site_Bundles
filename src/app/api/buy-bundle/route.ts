@@ -8,34 +8,17 @@ import { NextRequest, NextResponse }   from "next/server";
 import { createClient }                 from "@/lib/supabase/server";
 import { createAdminClient }            from "@/lib/supabase/admin";
 import type { SupabaseClient }          from "@supabase/supabase-js";
-import { datakazinaAPI }                from "@/lib/datakazina";
+import { datakazinaAPI, checkDatakazinaBalance } from "@/lib/datakazina";
 import { normalizePhoneNumber }         from "@/lib/networks";
 import { extractDakazinaOrderCode }     from "@/lib/dakazina-order-code";
 import {
   displayNetworkIdToDatakazina,
   resolveDisplayNetworkId,
 } from "@/lib/network-id-map";
-import { notifyAdminBundlePurchase }    from "@/lib/server/notifications";
-
-// ntfy configuration
-const NTFY_TOPIC = process.env.NTFY_TOPIC || "bundle-ghana";
-const NTFY_URL   = `https://ntfy.sh/${NTFY_TOPIC}`;
-
-async function sendNtfyNotification(title: string, message: string) {
-  try {
-    const asciiTitle = String(title).replace(/[^\x20-\x7E]/g, "").trim() || "Notification";
-    await fetch(NTFY_URL, {
-      method: "POST",
-      headers: {
-        "Title":    asciiTitle,
-        "Priority": "high",
-      },
-      body: message,
-    });
-  } catch (error) {
-    console.error("[buy-bundle] Failed to send ntfy notification:", error);
-  }
-}
+import {
+  notifyAdminBundlePurchase,
+  sendNtfyNotification,
+} from "@/lib/server/notifications";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -114,6 +97,41 @@ export async function POST(req: NextRequest) {
   const p = Number(price);
   if (!Number.isFinite(p) || p <= 0) {
     return NextResponse.json({ error: "Invalid price" }, { status: 400 });
+  }
+
+  const providerCost = p;
+  const datakazinaBalance = await checkDatakazinaBalance();
+  const lowBalanceThreshold = Number(process.env.DAKAZINA_LOW_BALANCE_THRESHOLD ?? "50");
+  const normalizedThreshold = Number.isFinite(lowBalanceThreshold) && lowBalanceThreshold >= 0
+    ? lowBalanceThreshold
+    : 50;
+
+  if (datakazinaBalance != null) {
+    if (datakazinaBalance < providerCost) {
+      console.warn("[buy-bundle][STEP-2] DataKazina balance too low", {
+        balance: datakazinaBalance,
+        providerCost,
+      });
+      return NextResponse.json(
+        { error: "Service temporarily unavailable. Please try again shortly." },
+        { status: 503 }
+      );
+    }
+
+    if (datakazinaBalance < normalizedThreshold) {
+      void sendNtfyNotification({
+        title: `Low DataKazina balance: GHS ${datakazinaBalance.toFixed(2)}`,
+        message: [
+          "⚠️ DataKazina reseller balance is running low.",
+          `Current balance: GHS ${datakazinaBalance.toFixed(2)}`,
+          `Low threshold: GHS ${normalizedThreshold.toFixed(2)}`,
+          `Order cost: GHS ${providerCost.toFixed(2)}`,
+          "The order may still proceed, but please top up soon.",
+          `Time: ${new Date().toISOString()}`,
+        ].join("\n"),
+        tags: "warning,alert",
+      });
+    }
   }
 
   const recipient_msisdn = normalizePhoneNumber(String(recipientMsisdn));
@@ -300,10 +318,11 @@ Transaction Code: ${providerCode}
 ⏰ Completed: ${new Date().toISOString()}
     `.trim();
 
-    void sendNtfyNotification(
-      `Purchase: GHS ${p.toFixed(2)} - User ${user.id}`,
-      ntfyMessage
-    );
+    void sendNtfyNotification({
+      title: `Purchase: GHS ${p.toFixed(2)} - User ${user.id}`,
+      message: ntfyMessage,
+      tags: "shopping_cart,order",
+    });
 
     return NextResponse.json({
       success:          true,

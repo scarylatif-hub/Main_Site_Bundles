@@ -197,3 +197,39 @@ class DataKazinaAPI {
 }
 
 export const datakazinaAPI = new DataKazinaAPI();
+
+function parseDatakazinaBalance(raw: unknown): number | null {
+  const text = String(raw ?? "").trim();
+  if (!text) return null;
+
+  const match = text.match(/[+-]?[0-9]+(?:[\.,][0-9]+)?/);
+  if (!match) return null;
+
+  const normalized = match[0].replace(/,/g, ".");
+  const value = Number(normalized);
+  return Number.isFinite(value) ? value : null;
+}
+
+export async function checkDatakazinaBalance(): Promise<number | null> {
+  if (!API_KEY || !BASE_URL) {
+    console.error("[provider-api] checkDatakazinaBalance skipped: missing DATAKAZINA_API_KEY or DATAKAZINA_BASE_URL");
+    return null;
+  }
+
+  const result = await datakazinaAPI.checkConsoleBalance();
+  if (!result.ok || !result.data) {
+    console.error("[provider-api] checkDatakazinaBalance failed:", {
+      status: result.status,
+      rawText: result.rawText,
+    });
+    return null;
+  }
+
+  const balance = parseDatakazinaBalance(result.data["Wallet Balance"]);
+  if (balance == null) {
+    console.error("[provider-api] checkDatakazinaBalance could not parse balance:", result.data["Wallet Balance"]);
+    return null;
+  }
+
+  return balance;
+}

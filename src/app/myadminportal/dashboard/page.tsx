@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DashboardChart } from "./dashboard-chart";
 import { getRetailPriceMultiplier } from "@/lib/pricing";
+import { checkDatakazinaBalance } from "@/lib/datakazina";
 import {
   buildPhoneProfileMap,
   fetchExternalAllOrdersRaw,
@@ -267,6 +268,7 @@ export default async function MyAdminDashboardPage() {
     ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "")}/api/webhooks/dakazina`
     : null;
   const datakazinaApiKeyStatus = process.env.DATAKAZINA_API_KEY ? "Configured" : "Missing";
+  const datakazinaBalance = await checkDatakazinaBalance();
 
   const now = new Date();
 
@@ -359,6 +361,12 @@ export default async function MyAdminDashboardPage() {
           </p>
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+          <div className="rounded-lg border border-border bg-muted px-4 py-3 text-right text-xs text-muted-foreground sm:text-left">
+            <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground/80">DataKazina balance</p>
+            <p className="text-base font-semibold tracking-tight text-foreground">
+              {datakazinaBalance != null ? `GHS ${datakazinaBalance.toFixed(2)}` : "Unavailable"}
+            </p>
+          </div>
           <Button asChild variant="outline" className="w-full gap-2 sm:w-auto">
             <Link href="/myadminportal/withdrawals">
               <Wallet className="h-4 w-4" />
