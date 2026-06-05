@@ -7,7 +7,10 @@ import webpush from "web-push";
 
 const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
-const vapidEmail = process.env.VAPID_EMAIL || "mailto:admin@sbbundles.com";
+const rawVapidEmail = process.env.VAPID_EMAIL || "mailto:admin@sbbundles.com";
+const vapidEmail = rawVapidEmail.startsWith("mailto:")
+  ? rawVapidEmail
+  : `mailto:${rawVapidEmail}`;
 
 if (vapidPublicKey && vapidPrivateKey) {
   webpush.setVapidDetails(
