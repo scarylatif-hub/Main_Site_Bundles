@@ -83,6 +83,7 @@ export async function POST(
         momoNumber: withdrawal.momo_number,
         momoName: withdrawal.momo_name,
         method: withdrawal.method,
+        userId: withdrawal.user_id,
       });
     } catch (notifyError) {
       console.error("Withdrawal completion notify failed:", notifyError);

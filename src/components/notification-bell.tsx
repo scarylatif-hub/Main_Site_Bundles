@@ -12,6 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { NotificationToggle } from "@/components/notification-toggle";
 import { format } from "date-fns";
 
 type Broadcast = {
@@ -127,6 +128,10 @@ export function NotificationBell() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80 max-h-[min(70vh,420px)] overflow-y-auto">
         <DropdownMenuLabel>Notifications</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <div className="p-2 bg-muted/20 border-b">
+          <NotificationToggle />
+        </div>
         <DropdownMenuSeparator />
         {items.length === 0 ? (
           <div className="px-2 py-6 text-center text-sm text-muted-foreground">

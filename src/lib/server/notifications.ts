@@ -3,6 +3,74 @@
 import { normalizeOrderStatus } from "@/lib/order-status";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import webpush from "web-push";
+
+const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
+const vapidEmail = process.env.VAPID_EMAIL || "mailto:admin@sbbundles.com";
+
+if (vapidPublicKey && vapidPrivateKey) {
+  webpush.setVapidDetails(
+    vapidEmail,
+    vapidPublicKey,
+    vapidPrivateKey
+  );
+}
+
+export async function sendWebPushNotification(
+  userId: string,
+  payload: { title: string; body: string; url?: string }
+): Promise<void> {
+  if (!vapidPublicKey || !vapidPrivateKey) {
+    console.warn("VAPID keys not configured, skipping web push");
+    return;
+  }
+
+  try {
+    const admin = createAdminClient();
+    const { data: subscriptions, error } = await admin
+      .from("push_subscriptions")
+      .select("*")
+      .eq("user_id", userId);
+
+    if (error) {
+      console.error("Error fetching push subscriptions:", error);
+      return;
+    }
+
+    if (!subscriptions || subscriptions.length === 0) {
+      return;
+    }
+
+    const payloadString = JSON.stringify(payload);
+
+    const promises = subscriptions.map(async (sub) => {
+      const pushSubscription = {
+        endpoint: sub.endpoint,
+        keys: {
+          p256dh: sub.p256dh,
+          auth: sub.auth,
+        },
+      };
+
+      try {
+        await webpush.sendNotification(pushSubscription, payloadString);
+      } catch (err: any) {
+        if (err.statusCode === 410 || err.statusCode === 404) {
+          console.log("Cleaning up expired push subscription:", sub.id);
+          await admin.from("push_subscriptions").delete().eq("id", sub.id);
+        } else {
+          console.error("Error sending push notification:", err);
+        }
+      }
+    });
+
+    await Promise.all(promises);
+  } catch (err) {
+    console.error("Failed to dispatch push notifications:", err);
+  }
+}
+
 
 function ntfyTopic(): string {
   return (process.env.NTFY_TOPIC || "bundle-ghana").trim();
@@ -146,6 +214,13 @@ export async function notifyAdminWalletDepositCredited(params: {
       product: "Wallet Deposit",
       phoneNumber: profile?.phone_number ? String(profile.phone_number) : undefined,
     });
+
+    // Notify user via Web Push
+    await sendWebPushNotification(params.userId, {
+      title: "Wallet Funded! 💰",
+      body: `Your wallet has been credited with GHS ${amount.toFixed(2)}.`,
+      url: "/wallet",
+    });
   } catch (error) {
     console.error("notifyAdminWalletDepositCredited:", error);
   }
@@ -178,6 +253,13 @@ export async function notifyAdminBundlePurchase(params: {
       amount: params.amountGhs,
       product: `${params.dataAmount} (net ${params.networkId})`,
       phoneNumber: params.recipientMsisdn,
+    });
+
+    // Notify user via Web Push
+    await sendWebPushNotification(params.userId, {
+      title: "Order Received! 🛒",
+      body: `Your order for ${params.dataAmount} data to ${params.recipientMsisdn} has been submitted.`,
+      url: "/orders",
     });
   } catch (error) {
     console.error("notifyAdminBundlePurchase:", error);
@@ -319,7 +401,16 @@ export async function notifyWithdrawalCompleted(params: {
   momoNumber?: string | null;
   momoName?: string | null;
   method?: string | null;
+  userId?: string;
 }): Promise<boolean> {
+  if (params.userId) {
+    void sendWebPushNotification(params.userId, {
+      title: "Withdrawal Completed! ✅",
+      body: `Your withdrawal of GHS ${safeFormatPrice(params.amountGhs)} has been processed to ${params.momoNumber || 'your mobile money account'}.`,
+      url: "/reseller/dashboard",
+    });
+  }
+
   return sendNtfyNotification({
     title: `Withdrawal Completed: GHS ${safeFormatPrice(params.amountGhs)}`,
     message: [
@@ -438,6 +529,13 @@ export async function notifyAdminOrderDeliveredIfNeeded(params: {
       customerName,
       product: tx.bundle_amount || "Data bundle",
       beneficiary: tx.recipient_msisdn || "-",
+    });
+
+    // Notify user via Web Push
+    await sendWebPushNotification(tx.user_id, {
+      title: "Order Delivered! 📦",
+      body: `Your bundle (${tx.bundle_amount || 'Data bundle'}) was successfully delivered to ${tx.recipient_msisdn || ''}.`,
+      url: "/orders",
     });
   } catch (error) {
     console.error("notifyAdminOrderDeliveredIfNeeded:", error);
