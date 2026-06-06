@@ -198,6 +198,13 @@ export default function StoreClient({ storeOwner, packages }: StoreClientProps) 
       });
   }, []);
 
+  useEffect(() => {
+    if (tab !== "orders" || !phone) return;
+    loadOrders(phone);
+    const interval = window.setInterval(() => loadOrders(phone), 20000);
+    return () => window.clearInterval(interval);
+  }, [tab, phone]);
+
   function handlePhoneDetect(val: string) {
     const net = detectNetwork(val);
     setDetectedNet(net);
