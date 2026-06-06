@@ -5,7 +5,7 @@
 // recipients  is a JSON array of strings, NOT comma-separated.
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -187,7 +187,29 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Persist to DB
-    const item = await saveNotification(title, message, mode, recipients.length);
+    const adminSupabase = createAdminClient();
+    const { data: createdItem, error: insertError } = await adminSupabase
+      .from("broadcast_notifications")
+      .insert({ title, message })
+      .select()
+      .maybeSingle();
+
+    if (insertError) {
+      console.error("[broadcast-notifications][insert]", insertError);
+      return NextResponse.json(
+        { error: "Failed to save broadcast notification" },
+        { status: 500 }
+      );
+    }
+
+    const item = {
+      id: createdItem?.id ?? crypto.randomUUID(),
+      title,
+      message,
+      recipients_mode: mode,
+      recipient_count: recipients.length,
+      created_at: createdItem?.created_at ?? new Date().toISOString(),
+    };
 
     // 4. Arkesel config from env
     const apiKey   = process.env.ARKESEL_SMS_API_KEY;
@@ -229,7 +251,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "id query param required" }, { status: 400 });
     }
 
-    const supabase = await createClient();
+    const supabase = createAdminClient();
     const { data, error } = await supabase
       .from("broadcast_notifications")
       .delete()
@@ -257,7 +279,7 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "id, title and message required" }, { status: 400 });
     }
 
-    const supabase = await createClient();
+    const supabase = createAdminClient();
     const { data, error } = await supabase
       .from("broadcast_notifications")
       .update({ title: title.trim(), message: message.trim() })
