@@ -30,6 +30,24 @@ export const MTN_RETAIL_GHS: Record<number, number> = {
   200: 599.99,
 };
 
+export const MTN_EXPRESS_RETAIL_GHS: Record<number, number> = {
+  1: 4.50,
+  2: 9.00,
+  3: 13.50,
+  4: 18.00,
+  5: 22.50,
+  6: 27.00,
+  7: 31.50,
+  8: 36.00,
+  10: 44.00,
+  15: 65.00,
+  20: 87.00,
+  25: 109.00,
+  30: 130.00,
+  40: 172.00,
+  50: 215.00,
+};
+
 export const TELECEL_RETAIL_GHS: Record<number, number> = {
   5: 120.50,
   10: 39.99,
@@ -307,11 +325,13 @@ export function getRetailPriceGhs(
   const map =
     displayNetworkId === 1
       ? MTN_RETAIL_GHS
-      : displayNetworkId === 2
-        ? TELECEL_RETAIL_GHS
-        : displayNetworkId === 3
-          ? AIRTELTIGO_RETAIL_GHS
-          : null;
+      : displayNetworkId === 6
+        ? MTN_EXPRESS_RETAIL_GHS
+        : displayNetworkId === 2
+          ? TELECEL_RETAIL_GHS
+          : displayNetworkId === 3
+            ? AIRTELTIGO_RETAIL_GHS
+            : null;
   if (!map) return null;
   return map[key] ?? null;
 }

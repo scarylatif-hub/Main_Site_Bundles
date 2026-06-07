@@ -194,6 +194,20 @@ export async function POST(req: NextRequest) {
     }
     transactionsUpdated = updatedTransactions?.length ?? 0;
     console.log(`✅ Dakazina webhook: Updated ${transactionsUpdated} transactions`);
+
+    if (status === "delivered" && transactionMatches) {
+      const { notifyAdminOrderDeliveredIfNeeded } = require("@/lib/server/notifications");
+      for (const tx of transactionMatches) {
+        if (tx.status !== "delivered") {
+          void notifyAdminOrderDeliveredIfNeeded({
+            admin,
+            transaction_id: tx.id,
+            previousStatus: tx.status,
+            newStatus: "delivered",
+          });
+        }
+      }
+    }
   }
 
   // ── Orders lookup ────────────────────────────────────────────────────────
@@ -251,6 +265,20 @@ export async function POST(req: NextRequest) {
     }
     ordersUpdated = updatedOrders?.length ?? 0;
     console.log(`✅ Dakazina webhook: Updated ${ordersUpdated} orders`);
+
+    if (status === "delivered" && orderMatches) {
+      const { notifyAdminOrderDeliveredIfNeeded } = require("@/lib/server/notifications");
+      for (const order of orderMatches) {
+        if (order.status !== "delivered") {
+          void notifyAdminOrderDeliveredIfNeeded({
+            admin,
+            transaction_id: order.id,
+            previousStatus: order.status,
+            newStatus: "delivered",
+          });
+        }
+      }
+    }
   }
 
   const response = {

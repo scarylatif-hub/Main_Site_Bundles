@@ -291,6 +291,14 @@ export async function POST(req: NextRequest) {
     })
     .eq("id", newOrder.id);
 
+  const { notifyAdminOrderDeliveredIfNeeded } = require("@/lib/server/notifications");
+  void notifyAdminOrderDeliveredIfNeeded({
+    admin,
+    transaction_id: newOrder.id,
+    previousStatus: "processing",
+    newStatus: "delivered",
+  });
+
   // Removed profit logging to prevent exposing financial data in console
 
   // Store profit is tracked in orders table via reseller_profit field

@@ -10,6 +10,7 @@ export function datakazinaNetworkIdToDisplay(datakazinaNetworkId: number): numbe
   if (datakazinaNetworkId === 3 || datakazinaNetworkId === 5) return 1; // MTN
   if (datakazinaNetworkId === 2) return 2;                              // Telecel
   if (datakazinaNetworkId === 1 || datakazinaNetworkId === 4) return 3; // AT
+  if (datakazinaNetworkId === 6) return 6;                              // MTN EXPRESS
   console.warn(`[network-id-map] Unknown DataKazina network_id: ${datakazinaNetworkId}`);
   return datakazinaNetworkId;
 }
@@ -27,6 +28,7 @@ export function displayNetworkIdToDatakazina(
     return Math.trunc(Number(providerNetworkId));
   }
   if (displayNetworkId === 1) return 3; // MTN
+  if (displayNetworkId === 6) return 6; // MTN EXPRESS
   if (displayNetworkId === 2) return 2; // Telecel
   if (displayNetworkId === 3) return 1; // AT (default to iSHare if no providerNetworkId)
   return displayNetworkId;
@@ -59,6 +61,7 @@ export function displayNetworkIdFromProviderLabel(
 ): number | null {
   if (!name) return null;
   const n = name.trim().toLowerCase().replace(/\s+/g, " ");
+  if (n.includes("express") || n.includes("mtn express")) return 6; // MTN EXPRESS
   if (n.includes("mtn")) return 1;
   if (n.includes("telecel") || n.includes("vodafone")) return 2;
   if (

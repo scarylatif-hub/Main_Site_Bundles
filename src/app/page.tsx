@@ -34,6 +34,7 @@ export default function Home() {
   const [selectedNetwork, setSelectedNetwork] = useState<NetworkName | null>(null);
   const [allPackages, setAllPackages] = useState<Package[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [mtnSubType, setMtnSubType] = useState<'regular' | 'express'>('regular');
 
   useEffect(() => {
     const fetchPackages = async () => {
@@ -66,9 +67,23 @@ export default function Home() {
   const filteredPackages = useMemo(() => {
     if (!selectedNetwork) return [];
     return allPackages
-      .filter((pkg) => pkg.network?.name?.toLowerCase() === selectedNetwork.toLowerCase())
+      .filter((pkg) => {
+        const matchesNetwork = pkg.network?.name?.toLowerCase() === selectedNetwork.toLowerCase();
+        if (!matchesNetwork) return false;
+
+        // If MTN, filter by active sub-type
+        if (selectedNetwork === 'MTN') {
+          if (mtnSubType === 'express') {
+            return pkg.network.id === 6;
+          } else {
+            return pkg.network.id === 1;
+          }
+        }
+
+        return true;
+      })
       .sort((a, b) => a.price - b.price);
-  }, [selectedNetwork, allPackages]);
+  }, [selectedNetwork, mtnSubType, allPackages]);
 
   const handleBuyPackage = (pkg: Package) => {
     if (!user) {
@@ -136,30 +151,61 @@ export default function Home() {
                <div className="space-y-2">
                   {[...Array(5)].map((_, i) => <Skeleton key={i} className="h-16 w-full rounded-lg" />)}
                </div>
-            ) : !selectedNetwork ? (
-              <div className="py-12 text-center text-muted-foreground">Choose a network to see available bundles</div>
-            ) : filteredPackages.length === 0 ? (
-              <div className="py-12 text-center text-muted-foreground">No bundles found for {selectedNetwork}</div>
             ) : (
-              <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2">
-                {filteredPackages.map((pkg) => (
-                  <div key={pkg.id} className="flex items-center justify-between rounded-lg border p-4 hover:border-accent hover:bg-accent/5 cursor-pointer group" onClick={() => handleBuyPackage(pkg)}>
-                    <div className="flex items-center gap-4">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-accent font-bold text-sm">
-                        {pkg.dataAmount.replace(/[^0-9.]/g, '')}
-                      </div>
-                      <div>
-                        <p className="font-semibold">{pkg.dataAmount}</p>
-                        <p className="text-xs text-muted-foreground">{pkg.validity || 'Non-expiry'}</p>
-                      </div>
-                    </div>
-                    {/* hh */}
-                    <div className="flex items-center gap-4">
-                      <p className="font-bold">GHS {pkg.price.toFixed(2)}</p>
-                      <Button size="sm" className="opacity-0 group-hover:opacity-100 transition-opacity"><ShoppingCart className="h-4 w-4 mr-1" />Buy</Button>
-                    </div>
+              <div className="space-y-4">
+                {selectedNetwork === 'MTN' && (
+                  <div className="flex justify-center gap-2 p-1 bg-muted rounded-lg max-w-xs mx-auto mb-2">
+                    <button
+                      onClick={() => setMtnSubType('regular')}
+                      className={cn(
+                        "flex-1 px-4 py-1.5 text-xs font-semibold rounded-md transition-all duration-200",
+                        mtnSubType === 'regular'
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      Regular
+                    </button>
+                    <button
+                      onClick={() => setMtnSubType('express')}
+                      className={cn(
+                        "flex-1 px-4 py-1.5 text-xs font-semibold rounded-md transition-all duration-200",
+                        mtnSubType === 'express'
+                          ? "bg-background text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      Express
+                    </button>
                   </div>
-                ))}
+                )}
+
+                {filteredPackages.length === 0 ? (
+                  <div className="py-12 text-center text-muted-foreground">
+                    No bundles found for {selectedNetwork} {selectedNetwork === 'MTN' && `(${mtnSubType})`}
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2">
+                    {filteredPackages.map((pkg) => (
+                      <div key={pkg.id} className="flex items-center justify-between rounded-lg border p-4 hover:border-accent hover:bg-accent/5 cursor-pointer group" onClick={() => handleBuyPackage(pkg)}>
+                        <div className="flex items-center gap-4">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-accent font-bold text-sm">
+                            {pkg.dataAmount.replace(/[^0-9.]/g, '')}
+                          </div>
+                          <div>
+                            <p className="font-semibold">{pkg.dataAmount}</p>
+                            <p className="text-xs text-muted-foreground">{pkg.validity || 'Non-expiry'}</p>
+                          </div>
+                        </div>
+                        {/* hh */}
+                        <div className="flex items-center gap-4">
+                          <p className="font-bold">GHS {pkg.price.toFixed(2)}</p>
+                          <Button size="sm" className="opacity-0 group-hover:opacity-100 transition-opacity"><ShoppingCart className="h-4 w-4 mr-1" />Buy</Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </AnimatePresence>

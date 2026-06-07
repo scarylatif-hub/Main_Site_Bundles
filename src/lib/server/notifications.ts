@@ -508,38 +508,128 @@ export async function notifyAdminOrderDeliveredIfNeeded(params: {
   }
 
   try {
+    let buyerId: string | null = null;
+    let product: string = "Data bundle";
+    let beneficiary: string = "-";
+    let customerName = "Customer";
+
+    // Try lookup as transaction first
     const tx = await loadPurchaseRowForDeliveryNotify(
       params.admin,
       params.transaction_id
     );
-    if (!tx?.user_id) {
-      return;
+
+    if (tx) {
+      buyerId = tx.user_id;
+      product = tx.bundle_amount || "Data bundle";
+      beneficiary = tx.recipient_msisdn || "-";
+
+      const { data: profile } = await params.admin
+        .from("profiles")
+        .select("full_name, email")
+        .eq("id", buyerId)
+        .maybeSingle();
+
+      customerName =
+        (profile?.full_name && String(profile.full_name).trim()) ||
+        (profile?.email && String(profile.email).trim()) ||
+        "Customer";
+    } else {
+      // Look up in orders table (store order)
+      const { data: order } = await params.admin
+        .from("orders")
+        .select("id, customer_id, phone_number, amount, package_id")
+        .or(`id.eq.${params.transaction_id},payment_reference.eq.${params.transaction_id},dakazina_order_id.eq.${params.transaction_id}`)
+        .maybeSingle();
+
+      if (!order) {
+        console.warn(`[notifyAdminOrderDeliveredIfNeeded] Could not find transaction or order with key: ${params.transaction_id}`);
+        return;
+      }
+
+      buyerId = order.customer_id;
+      beneficiary = order.phone_number || "-";
+      product = `${order.amount} GHS Bundle`;
+
+      if (order.package_id) {
+        try {
+          const { datakazinaAPI } = await import("@/lib/datakazina");
+          const pkgResult = await datakazinaAPI.fetchDataPackages();
+          if (pkgResult.ok && pkgResult.data) {
+            const pkg = pkgResult.data.find((p) => Number(p.id) === Number(order.package_id));
+            if (pkg) {
+              product = pkg.volumeGB || pkg.volume || `${order.amount} GHS Bundle`;
+            }
+          }
+        } catch (err) {
+          console.error("Error fetching packages for delivery notification:", err);
+        }
+      }
+
+      if (buyerId) {
+        const { data: profile } = await params.admin
+          .from("profiles")
+          .select("full_name, email")
+          .eq("id", buyerId)
+          .maybeSingle();
+
+        customerName =
+          (profile?.full_name && String(profile.full_name).trim()) ||
+          (profile?.email && String(profile.email).trim()) ||
+          "Customer";
+      } else {
+        customerName = "Guest Customer";
+      }
     }
 
-    const { data: profile } = await params.admin
-      .from("profiles")
-      .select("full_name, email")
-      .eq("id", tx.user_id)
-      .maybeSingle();
-
-    const customerName =
-      (profile?.full_name && String(profile.full_name).trim()) ||
-      (profile?.email && String(profile.email).trim()) ||
-      "Customer";
-
+    // 1. Send ntfy notification
     await sendAdminDeliveryNotification({
       orderId: params.transaction_id,
       customerName,
-      product: tx.bundle_amount || "Data bundle",
-      beneficiary: tx.recipient_msisdn || "-",
+      product,
+      beneficiary,
     });
 
-    // Notify user via Web Push
-    await sendWebPushNotification(tx.user_id, {
-      title: "Order Delivered! 📦",
-      body: `Your bundle (${tx.bundle_amount || 'Data bundle'}) was successfully delivered to ${tx.recipient_msisdn || ''}.`,
-      url: "/orders",
-    });
+    // 2. Fetch admin user IDs to send push notifications
+    const { data: adminProfiles } = await params.admin
+      .from("profiles")
+      .select("id")
+      .eq("is_admin", true);
+
+    const userIdsToNotify = new Set<string>();
+    if (buyerId) {
+      userIdsToNotify.add(buyerId);
+    }
+    if (adminProfiles) {
+      for (const adminProfile of adminProfiles) {
+        userIdsToNotify.add(adminProfile.id);
+      }
+    }
+
+    // 3. Dispatch push notifications to each recipient
+    for (const userId of userIdsToNotify) {
+      const isAdmin = adminProfiles?.some((a) => a.id === userId);
+      const isBuyer = userId === buyerId;
+
+      let title = "Order Delivered! 📦";
+      let body = `Your bundle (${product}) was successfully delivered to ${beneficiary}.`;
+      let url = "/orders";
+
+      if (isAdmin && !isBuyer) {
+        title = "Admin Notice: Order Delivered! 📦";
+        body = `Bundle (${product}) for ${customerName} was delivered to ${beneficiary}.`;
+        url = "/myadminportal/orders";
+      } else if (isAdmin && isBuyer) {
+        title = "Order Delivered! 📦 (Admin)";
+        body = `Your bundle (${product}) was delivered to ${beneficiary}.`;
+      }
+
+      await sendWebPushNotification(userId, {
+        title,
+        body,
+        url,
+      });
+    }
   } catch (error) {
     console.error("notifyAdminOrderDeliveredIfNeeded:", error);
   }
