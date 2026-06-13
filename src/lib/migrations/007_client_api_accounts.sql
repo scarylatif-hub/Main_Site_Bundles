@@ -89,7 +89,7 @@ BEGIN
   END IF;
 
   SELECT balance INTO v_balance
-  FROM public.api_balances
+  FROM public.api_balancesppp
   WHERE client_id = p_client_id
   FOR UPDATE;
 
