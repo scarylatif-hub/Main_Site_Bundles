@@ -74,7 +74,7 @@ $$;
 CREATE OR REPLACE FUNCTION public.consume_client_balance(
   p_client_id UUID,
   p_amount NUMERIC(12,2),
-  p_bundle_id TEXT DEFAULT NULL,
+  p_bundle_id TEXT DEFAULT NULL, 
   p_reference TEXT DEFAULT NULL
 )
 RETURNS JSONB
